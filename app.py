@@ -246,17 +246,18 @@ try:
 except:
     fin_history_res = []
 
-# Definizione delle Tab con inserimento dell'Albo d'Oro
+# Definizione delle Tab 
 if st.session_state.is_admin:
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab_hof, tab8 = st.tabs([
-        "📊 Dashboard & Finanze", "📈 Monte Ingaggi & Tax", "📋 Rose & Svincoli", 
+    tab1, tab_free, tab3, tab4, tab5, tab6, tab7, tab_report, tab_hof, tab8 = st.tabs([
+        "📊 Dashboard & Finanze", "🔎 Svincolati & Variazioni", "📋 Rose & Svincoli", 
         "👶 Panchina U21", "🤝 Scambi & Prestiti", "⚽ Inserimento Giornate", 
-        "⚽ Mercato", "🏛️ Albo d'Oro", "⚙️ Admin"
+        "⚽ Mercato Admin", "📜 Report Attività", "🏛️ Albo d'Oro", "⚙️ Admin"
     ])
 else:
-    tab1, tab2, tab3, tab4, tab5, tab6, tab_hof = st.tabs([
-        "📊 Dashboard & Finanze", "📈 Monte Ingaggi & Tax", "📋 La Mia Rosa & Previsioni", 
-        "👶 Panchina U21", "🤝 Scambi & Prestiti", "⚽ Inserimento Giornate", "🏛️ Albo d'Oro"
+    tab1, tab_free, tab3, tab4, tab5, tab6, tab_report, tab_hof = st.tabs([
+        "📊 Dashboard & Finanze", "🔎 Svincolati & Variazioni", "📋 La Mia Rosa & Previsioni", 
+        "👶 Panchina U21", "🤝 Scambi & Prestiti", "⚽ Inserimento Giornate", 
+        "📜 Report Attività", "🏛️ Albo d'Oro"
     ])
 
 # TAB 1: DASHBOARD, CLASSIFICA, MONTEPREMI & GRAFICO FINANZIARIO AVANZATO
@@ -308,7 +309,7 @@ with tab1:
         st.dataframe(df_rank_display, use_container_width=True)
         st.divider()
 
-    st.header("📈 Proiezione Trimestrale dei Flussi di Cassa (Spezzata a 4 Segmenti)")
+    st.header("📈 Proiezione Trimestrale dei Flussi di Cassa")
     st.write("Visualizzazione grafica in tempo reale dell'evoluzione della cassa intera attraverso i 4 trimestri stagionali: **Mese 0** (Attuale) ➔ **Mese 3** (+120 crediti) ➔ **Mese 6** (+120 crediti e -50% stipendi) ➔ **Mese 9** (+120 crediti) ➔ **Mese 12** (+120 crediti, -50% stipendi rimanenti, saldo stadio, luxury tax e paracadute).")
     
     valori_bonus = {'Base': int(rules['bonus_base']), 'Medio': int(rules['bonus_medio']), 'Top': int(rules['bonus_top']), 'Advanced': int(rules['bonus_advanced'])}
@@ -369,7 +370,6 @@ with tab1:
         })
 
     if projection_steps_dict:
-        # Aggiunti i prefissi numerici per costringere Streamlit a ordinare correttamente l'asse X
         timeline_index = [
             "00 - Inizio",
             "03 - 1° Trimestre",
@@ -387,33 +387,15 @@ with tab1:
     st.dataframe(df_proj, use_container_width=True)
     st.divider()
 
-    st.header("Situazione Finanziaria & Stadi")
-    if not teams:
-        st.info("Nessuna squadra presente.")
-    else:
-        for team in teams:
-            col1, col2, col3, col4, col5 = st.columns(5)
-            col1.write(f"🛡️ **{team['name']}**")
-            col2.write(f"💰 Cassa: **{int(round(float(team['balance'])))} M**")
-            col3.write(f"👶 Budget U21: **{int(round(float(team.get('u21_balance', 30))))} M**")
-            s_name = team.get('stadium_name', 'Stadio Comunale')
-            s_level = team.get('stadium_level', 'Base')
-            col4.write(f"🏟️ **{s_name}** ({s_level})")
-            col5.write(f"📜 Anni Contratto: **{int(team['total_contract_years'])}/{int(rules['max_contract_years'])}**")
-            st.divider()
-
-# TAB 2: MONTE INGAGGI & LUXURY TAX (SCHERMATA UNIFICATA)
-with tab2:
-    st.header(f"📈 Monitor Monte Ingaggi & Luxury Tax (Tetto: {int(rules['salary_cap'])}M)")
+    st.header("Situazione Finanziaria, Salary Cap & Stadi")
     if not teams:
         st.info("Nessuna squadra presente.")
     else:
         SALARY_CAP = int(round(float(rules['salary_cap'])))
-        dati_tax = []
         totale_tax_raccolta = 0
-        
+        dati_tax = []
         rank_map = {item['name']: idx+1 for idx, item in enumerate(classifica_ordinata)}
-        
+
         for team in teams:
             t_players = [p for p in players if p.get('team_id') == team['id'] and not check_is_abroad(p)]
             monte_ingaggi = int(sum([int(round(float(p.get('salary') or 0))) for p in t_players]))
@@ -422,27 +404,26 @@ with tab2:
             totale_tax_raccolta += tassa_dovuta
             
             calc_rank = rank_map.get(team['name'], 1)
-            
             dati_tax.append({
-                "team_id": team['id'],
-                "name": team['name'],
-                "monte_ingaggi": monte_ingaggi,
-                "sforo": sforo,
-                "tassa": tassa_dovuta,
-                "ranking": calc_rank
+                "team_id": team['id'], "name": team['name'], "monte_ingaggi": monte_ingaggi,
+                "sforo": sforo, "tassa": tassa_dovuta, "ranking": calc_rank
             })
-            
-            col_a, col_b, col_c, col_d = st.columns(4)
-            col_a.write(f"🛡️ **{team['name']}** (Rank Classifica: {calc_rank})")
-            col_b.write(f"💵 Monte Ingaggi: **{monte_ingaggi}M** / {SALARY_CAP}M")
+
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
+            col1.write(f"🛡️ **{team['name']}**")
+            col2.markdown(f"💰 Cassa: **{int(round(float(team['balance'])))} M**<br>👶 U21: **{int(round(float(team.get('u21_balance', 30))))} M**", unsafe_allow_html=True)
+            col3.write(f"💵 Ingaggi: **{monte_ingaggi}M** / {SALARY_CAP}M")
             if sforo > 0:
-                col_c.markdown(f"<span style='color: #c0392b; font-weight: bold;'>Sforo: +{sforo}M 🔴</span>", unsafe_allow_html=True)
-                col_d.markdown(f"<span style='color: #c0392b; font-weight: bold;'>Luxury Tax: {tassa_dovuta}M</span>", unsafe_allow_html=True)
+                col4.markdown(f"<span style='color: #c0392b; font-weight:bold;'>Sforo: +{sforo}M<br>Tax: -{tassa_dovuta}M</span>", unsafe_allow_html=True)
             else:
-                col_c.markdown("<span style='color: #27ae60;'>In regola 🟢</span>", unsafe_allow_html=True)
-                col_d.write("Luxury Tax: 0M")
-            st.divider()
+                col4.markdown("<span style='color: #27ae60; font-weight:bold;'>In regola 🟢</span>", unsafe_allow_html=True)
             
+            s_name = team.get('stadium_name', 'Stadio Comunale')
+            s_level = team.get('stadium_level', 'Base')
+            col5.markdown(f"🏟️ **{s_name}**<br>({s_level})", unsafe_allow_html=True)
+            col6.write(f"📜 Anni Contratto: **{int(team['total_contract_years'])}/{int(rules['max_contract_years'])}**")
+            st.divider()
+
         st.subheader("💡 Simulazione Previsionale Distribuzione a 'Cascade' della Luxury Tax")
         st.write(f"Totale Luxury Tax accumulata dalle squadre oltre il cap: **{totale_tax_raccolta} M**")
         
@@ -456,6 +437,46 @@ with tab2:
                 st.markdown(f"- **{v['name']}** (Rank {v['ranking']}): riceverebbe stimati **+{quota_base} M**")
         else:
             st.info("Nessuna squadra virtuosa o tassa accumulata al momento.")
+
+# TAB NUOVA: MERCATO LIBERO & VARIAZIONI
+with tab_free:
+    st.header("🔎 Mercato Svincolati e Variazioni di Valore")
+    
+    with st.expander("📝 Listone Svincolati (Giocatori Senza Squadra)", expanded=True):
+        free_agents = [p for p in players if p.get('team_id') is None]
+        if not free_agents:
+            st.info("Tutti i giocatori sono stati assegnati!")
+        else:
+            df_fa = pd.DataFrame(free_agents)
+            df_fa['Valore'] = df_fa['current_fg_value'].apply(lambda x: int(round(float(x or 1))))
+            df_fa_display = df_fa[['name', 'roles', 'serie_a_team', 'Valore']].copy()
+            df_fa_display.columns = ["Giocatore", "Ruoli", "Squadra Serie A", "Quotazione"]
+            df_fa_display = df_fa_display.sort_values(by="Quotazione", ascending=False).reset_index(drop=True)
+            st.dataframe(df_fa_display, use_container_width=True)
+
+    with st.expander("📈 Giocatori con Variazione di Valore (Accasati)"):
+        variati = []
+        for p in players:
+            if p.get('team_id') is not None:
+                valore_att = int(round(float(p.get('current_fg_value') or 0)))
+                stipendio = int(round(float(p.get('salary') or 0)))
+                if valore_att != stipendio:
+                    fanta_team = next((t['name'] for t in teams if t['id'] == p['team_id']), "N/D")
+                    variazione = valore_att - stipendio
+                    segno = "+" if variazione > 0 else ""
+                    variati.append({
+                        "Giocatore": p['name'],
+                        "Valore Attuale": valore_att,
+                        "Stipendio": stipendio,
+                        "Variazione": f"{segno}{variazione} M",
+                        "Squadra Serie A": p.get('serie_a_team', ''),
+                        "Fanta Squadra": fanta_team
+                    })
+        if variati:
+            df_var = pd.DataFrame(variati).sort_values(by="Valore Attuale", ascending=False).reset_index(drop=True)
+            st.dataframe(df_var, use_container_width=True)
+        else:
+            st.info("Nessun giocatore ha attualmente un valore di mercato diverso dal proprio stipendio d'acquisto.")
 
 # TAB 3: ROSE ORDINATE PER RUOLO, SVINCOLI & CESSIONI ALL'ESTERO
 with tab3:
@@ -638,38 +659,38 @@ with tab4:
             svincolati_listone = [p for p in players if p.get('team_id') is None]
             
             if svincolati_listone:
-                svincolati_ordinati = sorted(svincolati_listone, key=lambda x: x['name'])
-                selected_u21_player = st.selectbox(
-                    "Seleziona Giovane dal Listone Svincolati",
-                    options=[p['id'] for p in svincolati_ordinati],
-                    format_func=lambda x: next(f"{p['name']} | Ruolo: {p.get('roles', 'N/D')} | Squadra: {p.get('serie_a_team', 'N/D')}" for p in svincolati_ordinati if p['id'] == x),
-                    key="sel_giovane_u21"
-                )
-                costo_u21 = st.number_input("Costo d'Acquisto dal Budget U21 (M)", min_value=1, max_value=int(max(1, current_u21_balance)), value=1, step=1, key="costo_giovane_u21")
-                
-                if st.button("Aggiungi alla Panchina U21 ✍️", key="btn_add_u21"):
-                    p_obj = next(p for p in svincolati_listone if p['id'] == selected_u21_player)
+                with st.form("acquista_u21_form"):
+                    svincolati_ordinati = sorted(svincolati_listone, key=lambda x: x['name'])
+                    selected_u21_player = st.selectbox(
+                        "Seleziona Giovane dal Listone Svincolati",
+                        options=[p['id'] for p in svincolati_ordinati],
+                        format_func=lambda x: next(f"{p['name']} | Ruolo: {p.get('roles', 'N/D')} | Squadra: {p.get('serie_a_team', 'N/D')}" for p in svincolati_ordinati if p['id'] == x)
+                    )
+                    costo_u21 = st.number_input("Costo d'Acquisto dal Budget U21 (M)", min_value=1, max_value=int(max(1, current_u21_balance)), value=1, step=1)
                     
-                    if current_u21_balance < costo_u21:
-                        st.error("❌ Budget U21 insufficiente (massimo 30M totali).")
-                    else:
-                        supabase.table("u21_players").insert({
-                            "name": p_obj['name'],
-                            "roles": p_obj.get('roles', ''),
-                            "serie_a_team": p_obj.get('serie_a_team', ''),
-                            "team_id": selected_u21_team_id,
-                            "budget_used": int(costo_u21),
-                            "presenze": 0
-                        }).execute()
+                    if st.form_submit_button("Aggiungi alla Panchina U21 ✍️"):
+                        p_obj = next(p for p in svincolati_listone if p['id'] == selected_u21_player)
                         
-                        supabase.table("teams").update({
-                            "u21_balance": int(current_u21_balance - costo_u21)
-                        }).eq("id", selected_u21_team_id).execute()
-                        
-                        supabase.table("players").update({"team_id": selected_u21_team_id, "salary": 0, "contract_years": 0, "is_under_21": True}).eq("id", selected_u21_player).execute()
-                        
-                        st.success(f"✅ {p_obj['name']} inserito con successo nella Panchina U21!")
-                        st.rerun()
+                        if current_u21_balance < costo_u21:
+                            st.error("❌ Budget U21 insufficiente (massimo 30M totali).")
+                        else:
+                            supabase.table("u21_players").insert({
+                                "name": p_obj['name'],
+                                "roles": p_obj.get('roles', ''),
+                                "serie_a_team": p_obj.get('serie_a_team', ''),
+                                "team_id": selected_u21_team_id,
+                                "budget_used": int(costo_u21),
+                                "presenze": 0
+                            }).execute()
+                            
+                            supabase.table("teams").update({
+                                "u21_balance": int(current_u21_balance - costo_u21)
+                            }).eq("id", selected_u21_team_id).execute()
+                            
+                            supabase.table("players").update({"team_id": selected_u21_team_id, "salary": 0, "contract_years": 0, "is_under_21": True}).eq("id", selected_u21_player).execute()
+                            
+                            st.success(f"✅ {p_obj['name']} inserito con successo nella Panchina U21!")
+                            st.rerun()
 
 # TAB 5: SCAMBI & PRESTITI
 with tab5:
@@ -756,7 +777,7 @@ with tab5:
                     st.rerun()
             else:
                 st.info("La squadra selezionata non ha giocatori in rosa.")
-                    
+                
             st.write("**Prestiti Attivi:**")
             if loans_res:
                 for l in loans_res:
@@ -1008,6 +1029,37 @@ if st.session_state.is_admin:
             else:
                 st.info("Nessun giocatore in scadenza di contratto al momento.")
 
+# TAB REPORT: ATTIVITA' E LOG
+with tab_report:
+    st.header("📜 Report Attività e Modifiche")
+    st.write("In questa schermata puoi monitorare gli ultimi aggiornamenti effettuati sulle casse delle squadre (es. Svincoli, Multe, Tranches, Bonus, Acquisti, Modifiche Admin).")
+    
+    if fin_history_res:
+        df_rep = pd.DataFrame(fin_history_res)
+        id_to_name = {t['id']: t['name'] for t in teams}
+        df_rep['Fanta Squadra'] = df_rep['team_id'].map(id_to_name)
+        
+        def format_date(iso_str):
+            try:
+                dt = datetime.fromisoformat(iso_str.replace('Z', '+00:00'))
+                return dt.strftime("%d/%m/%Y %H:%M:%S")
+            except:
+                return iso_str
+        
+        if 'timestamp' in df_rep.columns:
+            df_rep['Data e Ora'] = df_rep['timestamp'].apply(format_date)
+            df_rep = df_rep.sort_values(by='timestamp', ascending=False)
+        else:
+            df_rep['Data e Ora'] = "N/D"
+            
+        df_rep['Azione / Modifica'] = df_rep['event_label']
+        df_rep['Nuovo Saldo (M)'] = df_rep['balance_snapshot']
+        
+        df_rep_display = df_rep[['Data e Ora', 'Fanta Squadra', 'Azione / Modifica', 'Nuovo Saldo (M)']].reset_index(drop=True)
+        st.dataframe(df_rep_display, use_container_width=True)
+    else:
+        st.info("Nessuna attività registrata finora nell'ambiente finanziario.")
+
 # TAB ALBO D'ORO: CONSULTAZIONE STAGIONI ARCHIVIATE
 with tab_hof:
     st.header("🏛️ Albo d'Oro & Archivio Storico Campionati")
@@ -1019,7 +1071,7 @@ with tab_hof:
         hof_res = []
         
     if not hof_res:
-        st.info("Nessuna stagione ancora archiviata nell'Albo d'Oro. La prima stagione verrà archiviata al completamento della Procedura di Fine Stagione (Passo 5).")
+        st.info("Nessuna stagione ancora archiviata nell'Albo d'Oro. La prima stagione verrà archiviata al completamento della Procedura di Fine Stagione.")
     else:
         stagioni_disponibili = [h['season'] for h in hof_res if 'season' in h]
         if not stagioni_disponibili:
@@ -1078,7 +1130,7 @@ if st.session_state.is_admin:
     with tab8:
         st.header("⚙️ Pannello di Controllo Amministratore")
         
-        with st.expander("🛠️ 0. Regole & Parametri della Lega (Gestione Stagioni / Non Retroattivo)"):
+        with st.expander("🛠️ 0. Regole & Parametri della Lega (Gestione Stagioni)"):
             target_season = st.text_input("Stagione di Riferimento", value=active_season)
             
             r_tranche = st.number_input("Valore Tranche Trimestrale (M)", value=int(rules['tranche_value']), step=1)
