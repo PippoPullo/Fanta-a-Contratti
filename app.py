@@ -13,6 +13,13 @@ def init_connection():
 
 supabase = init_connection()
 
+# Controllo integrità Database per i Rinnovi
+try:
+    supabase.table("players").select("future_salary").limit(1).execute()
+except Exception as e:
+    st.error("⚠️ **AGGIORNAMENTO DATABASE RICHIESTO PER I RINNOVI!** Vai nell'SQL Editor di Supabase ed esegui questo comando (copia e incolla):")
+    st.code("ALTER TABLE public.players ADD COLUMN IF NOT EXISTS future_salary INTEGER;\nALTER TABLE public.players ADD COLUMN IF NOT EXISTS future_contract_years INTEGER;", language="sql")
+
 def get_rules(season_name="2026/2027"):
     try:
         res = supabase.table("league_rules").select("*").eq("season", season_name).execute()
@@ -530,7 +537,9 @@ with tab3:
             h4.markdown("**Variazione**")
             h5.markdown("**Contratto**")
             if st.session_state.authenticated:
-                h6.markdown("**Azioni**")
+                h6.markdown("**Azioni / Stato**")
+            else:
+                h6.markdown("**Stato**")
             st.divider()
 
             updated_players = {}
@@ -548,6 +557,9 @@ with tab3:
                 stipendio_contratto = int(round(float(p.get('salary') or 0)))
                 quotazione_attuale = int(round(float(p.get('current_fg_value') or 0)))
                 anni_res_p = int(p.get('contract_years') or 0)
+                
+                fut_sal = p.get('future_salary')
+                fut_yr = p.get('future_contract_years')
                 
                 # Modifica massiva per Admin
                 if st.session_state.is_admin:
@@ -581,61 +593,80 @@ with tab3:
                 else:
                     col4.markdown("<span style='color: #7f8c8d;'>0 M</span>", unsafe_allow_html=True)
                 
-                # Azioni per Admin o Proprietario
-                if st.session_state.is_admin or (st.session_state.authenticated and selected_team_id == st.session_state.team_id):
-                    btn_svincola = col6.button("Svincola ❌", key=f"svincola_{p['id']}")
-                    btn_estero = col6.button("Cedi Estero ✈️", key=f"estero_{p['id']}")
-                    
-                    if btn_svincola:
-                        penale = calcola_10_percento(stipendio_contratto)
-                        cassa_team_attuale = int(round(float(team_data['balance'])))
-                        nuova_cassa = cassa_team_attuale - penale
-                        nuovi_anni = int(team_data['total_contract_years']) - int(p.get('contract_years') or 0)
+                if fut_sal and fut_yr:
+                    col6.markdown(f"🔄 **Rinnovato:**<br><small>{fut_yr} anni a {fut_sal}M</small>", unsafe_allow_html=True)
+                else:
+                    # Azioni per Admin o Proprietario
+                    if st.session_state.is_admin or (st.session_state.authenticated and selected_team_id == st.session_state.team_id):
+                        btn_svincola = col6.button("Svincola ❌", key=f"svincola_{p['id']}")
+                        btn_estero = col6.button("Cedi Estero ✈️", key=f"estero_{p['id']}")
                         
-                        if nuova_cassa < 0:
-                            st.error(f"Fondi insufficienti per pagare la penale ({penale}M).")
-                        else:
+                        # Rinnovo (se manca 1 anno)
+                        if anni_res_p == 1:
+                            with col6.popover("Rinnova 📝"):
+                                st.write(f"Rinnovo per {p['name']}")
+                                new_fut_sal = st.number_input("Nuovo Stipendio (M)", min_value=1, value=stipendio_contratto, step=1, key=f"rin_sal_{p['id']}")
+                                new_fut_yr = st.number_input("Anni Aggiuntivi", min_value=1, max_value=3, value=1, step=1, key=f"rin_yr_{p['id']}")
+                                if st.button("Firma Rinnovo", key=f"btn_firma_{p['id']}"):
+                                    try:
+                                        supabase.table("players").update({"future_salary": new_fut_sal, "future_contract_years": new_fut_yr}).eq("id", p['id']).execute()
+                                        t_p_agg = supabase.table("players").select("contract_years, future_contract_years").eq("team_id", selected_team_id).execute().data
+                                        tot_y = sum([int(tp.get('contract_years') or 0) + int(tp.get('future_contract_years') or 0) for tp in t_p_agg])
+                                        supabase.table("teams").update({"total_contract_years": tot_y}).eq("id", selected_team_id).execute()
+                                        st.rerun()
+                                    except Exception as e:
+                                        pass
+
+                        if btn_svincola:
+                            penale = calcola_10_percento(stipendio_contratto)
+                            cassa_team_attuale = int(round(float(team_data['balance'])))
+                            nuova_cassa = cassa_team_attuale - penale
+                            nuovi_anni = int(team_data['total_contract_years']) - int(p.get('contract_years') or 0) - int(p.get('future_contract_years') or 0)
+                            
+                            if nuova_cassa < 0:
+                                st.error(f"Fondi insufficienti per pagare la penale ({penale}M).")
+                            else:
+                                try:
+                                    supabase.table("transfer_history").insert({"player_name": p['name'], "team_id": selected_team_id}).execute()
+                                except:
+                                    pass
+                                    
+                                upd_svinc = {"team_id": None, "salary": None, "contract_years": None, "is_under_21": False, "future_salary": None, "future_contract_years": None}
+                                try:
+                                    supabase.table("players").update({**upd_svinc, "is_abroad": False}).eq("id", p['id']).execute()
+                                except:
+                                    supabase.table("players").update(upd_svinc).eq("id", p['id']).execute()
+                                    
+                                supabase.table("teams").update({"balance": int(nuova_cassa), "total_contract_years": int(nuovi_anni)}).eq("id", selected_team_id).execute()
+                                registra_snapshot_finanziario(selected_team_id, f"Svincolo {p['name']}", nuova_cassa)
+                                st.success(f"{p['name']} svincolato!")
+                                st.rerun()
+                                
+                        if btn_estero:
+                            p_price = int(round(float(p.get('purchase_price') or stipendio_contratto)))
+                            tot_anni = int(p.get('initial_contract_years') or 3)
+                            anni_res = int(p.get('contract_years') or 1)
+                            valore_residuo = int(round((p_price / max(1, tot_anni)) * anni_res))
+                            
+                            cassa_team_attuale = int(round(float(team_data['balance'])))
+                            nuova_cassa = cassa_team_attuale + valore_residuo
+                            nuovi_anni = int(team_data['total_contract_years']) - int(p.get('contract_years') or 0) - int(p.get('future_contract_years') or 0)
+                            
                             try:
                                 supabase.table("transfer_history").insert({"player_name": p['name'], "team_id": selected_team_id}).execute()
                             except:
                                 pass
                                 
-                            upd_svinc = {"team_id": None, "salary": None, "contract_years": None, "is_under_21": False}
+                            upd_estero = {"team_id": None, "salary": None, "contract_years": None, "is_under_21": False, "future_salary": None, "future_contract_years": None}
                             try:
-                                supabase.table("players").update({**upd_svinc, "is_abroad": False}).eq("id", p['id']).execute()
+                                supabase.table("players").update({**upd_estero, "is_abroad": False}).eq("id", p['id']).execute()
                             except:
-                                supabase.table("players").update(upd_svinc).eq("id", p['id']).execute()
+                                supabase.table("players").update(upd_estero).eq("id", p['id']).execute()
                                 
                             supabase.table("teams").update({"balance": int(nuova_cassa), "total_contract_years": int(nuovi_anni)}).eq("id", selected_team_id).execute()
-                            registra_snapshot_finanziario(selected_team_id, f"Svincolo {p['name']}", nuova_cassa)
-                            st.success(f"{p['name']} svincolato!")
+                            registra_snapshot_finanziario(selected_team_id, f"Cessione Estero {p['name']}", nuova_cassa)
+                            st.success(f"✈️ {p['name']} ceduto all'estero! Incassati {valore_residuo}M (valore residuo ammortato).")
                             st.rerun()
-                            
-                    if btn_estero:
-                        p_price = int(round(float(p.get('purchase_price') or stipendio_contratto)))
-                        tot_anni = int(p.get('initial_contract_years') or 3)
-                        anni_res = int(p.get('contract_years') or 1)
-                        valore_residuo = int(round((p_price / max(1, tot_anni)) * anni_res))
-                        
-                        cassa_team_attuale = int(round(float(team_data['balance'])))
-                        nuova_cassa = cassa_team_attuale + valore_residuo
-                        nuovi_anni = int(team_data['total_contract_years']) - int(p.get('contract_years') or 0)
-                        
-                        try:
-                            supabase.table("transfer_history").insert({"player_name": p['name'], "team_id": selected_team_id}).execute()
-                        except:
-                            pass
-                            
-                        upd_estero = {"team_id": None, "salary": None, "contract_years": None, "is_under_21": False}
-                        try:
-                            supabase.table("players").update({**upd_estero, "is_abroad": False}).eq("id", p['id']).execute()
-                        except:
-                            supabase.table("players").update(upd_estero).eq("id", p['id']).execute()
-                            
-                        supabase.table("teams").update({"balance": int(nuova_cassa), "total_contract_years": int(nuovi_anni)}).eq("id", selected_team_id).execute()
-                        registra_snapshot_finanziario(selected_team_id, f"Cessione Estero {p['name']}", nuova_cassa)
-                        st.success(f"✈️ {p['name']} ceduto all'estero! Incassati {valore_residuo}M (valore residuo ammortato).")
-                        st.rerun()
 
             if st.session_state.is_admin and team_players:
                 st.markdown("<br>", unsafe_allow_html=True)
@@ -647,8 +678,8 @@ with tab3:
                             changes_made = True
                     
                     if changes_made:
-                        t_players_aggiornati = supabase.table("players").select("contract_years").eq("team_id", selected_team_id).execute().data
-                        reale_somma_anni = sum([int(tp.get('contract_years') or 0) for tp in t_players_aggiornati])
+                        t_players_aggiornati = supabase.table("players").select("contract_years, future_contract_years").eq("team_id", selected_team_id).execute().data
+                        reale_somma_anni = sum([int(tp.get('contract_years') or 0) + int(tp.get('future_contract_years') or 0) for tp in t_players_aggiornati])
                         supabase.table("teams").update({"total_contract_years": reale_somma_anni}).eq("id", selected_team_id).execute()
                         st.success("✅ Modifiche multiple salvate con successo!")
                         st.rerun()
@@ -661,7 +692,7 @@ with tab3:
             
             costo_totale_attuale = int(sum([int(round(float(p.get('salary') or 0))) for p in team_players if not check_is_abroad(p)]))
             giocatori_in_scadenza = [p for p in team_players if int(p.get('contract_years') or 0) <= 1]
-            anni_residui_totali = int(sum([int(p.get('contract_years') or 0) for p in team_players]))
+            anni_residui_totali = int(sum([(int(p.get('contract_years') or 0) + int(p.get('future_contract_years') or 0)) for p in team_players]))
             
             p_col1, p_col2, p_col3 = st.columns(3)
             p_col1.metric("Monte Ingaggi Attivo", f"{costo_totale_attuale} M")
@@ -860,7 +891,21 @@ if st.session_state.authenticated:
                         owner_obj = next((t for t in teams if t['id'] == l['owner_team_id']), None)
                         borrower_obj = next((t for t in teams if t['id'] == l['borrower_team_id']), None)
                         if p_obj and owner_obj and borrower_obj:
-                            st.markdown(f"- 📋 **{p_obj['name']}** (Proprietario: {owner_obj['name']} ➔ In prestito a: {borrower_obj['name']} | Stipendio a carico del prestatario: {l['salary_percentage_borrower']}%)")
+                            col_l1, col_l2 = st.columns([5, 1])
+                            col_l1.markdown(f"- 📋 **{p_obj['name']}** (Proprietario: {owner_obj['name']} ➔ In prestito a: {borrower_obj['name']} | Stipendio a carico: {l['salary_percentage_borrower']}%)")
+                            
+                            if st.session_state.is_admin:
+                                if col_l2.button("Revoca ❌", key=f"rev_loan_{l['id']}"):
+                                    supabase.table("players").update({"team_id": owner_obj['id']}).eq("id", p_obj['id']).execute()
+                                    supabase.table("loans").delete().eq("id", l['id']).execute()
+                                    
+                                    for team_ricalc_id in [owner_obj['id'], borrower_obj['id']]:
+                                        t_p_agg = supabase.table("players").select("contract_years, future_contract_years").eq("team_id", team_ricalc_id).execute().data
+                                        tot_y = sum([int(tp.get('contract_years') or 0) + int(tp.get('future_contract_years') or 0) for tp in t_p_agg])
+                                        supabase.table("teams").update({"total_contract_years": tot_y}).eq("id", team_ricalc_id).execute()
+                                        
+                                    st.success(f"Prestito di {p_obj['name']} revocato con successo!")
+                                    st.rerun()
                 else:
                     st.info("Nessun prestito attivo registrato.")
 
@@ -1086,9 +1131,13 @@ if st.session_state.is_admin:
                                 supabase.table("players").update(upd_acq).eq("id", selected_player_id).execute()
                             
                             new_balance = cassa_t - costo_totale_iniziale
+                            
+                            t_p_agg = supabase.table("players").select("contract_years, future_contract_years").eq("team_id", team_id).execute().data
+                            tot_y = sum([int(tp.get('contract_years') or 0) + int(tp.get('future_contract_years') or 0) for tp in t_p_agg])
+
                             supabase.table("teams").update({
                                 "balance": int(new_balance),
-                                "total_contract_years": int(t_data['total_contract_years']) + anni_contratto
+                                "total_contract_years": tot_y
                             }).eq("id", team_id).execute()
                             
                             registra_snapshot_finanziario(team_id, f"Acquisto {nome_giocatore} (Cartellino + Bonus)", new_balance)
@@ -1218,12 +1267,14 @@ with tab_reg:
     * **Salary Cap (Tetto Ingaggi):** Fissato a **315 M**.
     * **Luxury Tax:** Superare il Salary Cap è permesso, ma costa caro. Chi sfora paga una tassa pari al **50% dello sforo**. L'intero ammontare della Luxury Tax raccolta a fine anno viene diviso in parti uguali e ridistribuito come premio di rendimento alle squadre virtuose che NON hanno sforato il tetto.
 
-    ### 3. Svincoli, Penali e Cessioni all'Estero
+    ### 3. Svincoli, Penali e Rinnovi
     * **Svincolo Unilaterale:** Svincolare un giocatore comporta il pagamento di una penale immediata pari al **10% del suo stipendio** (arrotondato).
-    * **Cessione all'Estero:** Se un giocatore va all'estero nella realtà, la FantaSquadra incassa immediatamente il **valore residuo ammortizzato** del cartellino. *Alternativamente*, è possibile mantenere il giocatore in rosa come "Congelato": i suoi anni di contratto continuano a pesare sul totale della squadra, ma **il suo stipendio non viene contato** né nel Salary Cap né nei pagamenti semestrali. Se torna in Serie A, il contratto si scongela.
-    * **Clausola Blocco Riacquisto:** Un giocatore venduto o svincolato non può essere riacquistato dalla stessa squadra per almeno **12 mesi**.
+    * **Rinnovi:** I giocatori in scadenza (1 anno rimasto) possono essere rinnovati. Verrà concordato un "Nuovo Stipendio" e degli "Anni Aggiuntivi". Gli anni extra si sommano *immediatamente* al calcolo dei 55 anni limite della squadra. Tuttavia, lo stipendio attuale rimarrà in vigore per la stagione in corso, e il nuovo stipendio si attiverà in automatico solo alla fine dell'anno, evitando lo svincolo.
 
-    ### 4. Infrastrutture: Lo Stadio
+    ### 4. Cessioni all'Estero
+    Se un giocatore va all'estero nella realtà, la FantaSquadra incassa immediatamente il **valore residuo ammortizzato** del cartellino. *Alternativamente*, è possibile mantenere il giocatore in rosa come "Congelato": i suoi anni di contratto continuano a pesare sul totale della squadra, ma **il suo stipendio non viene contato** né nel Salary Cap né nei pagamenti semestrali. Se torna in Serie A, il contratto si scongela.
+
+    ### 5. Infrastrutture: Lo Stadio
     Lo Stadio è un asset fondamentale che garantisce introiti a fine stagione, ma richiede manutenzione. Esistono 4 Livelli:
     1. **Base:** Manutenzione 2M / Bonus Incasso +5M
     2. **Medio:** Manutenzione 5M / Bonus Incasso +10M
@@ -1231,24 +1282,24 @@ with tab_reg:
     4. **Advanced:** Manutenzione 15M / Bonus Incasso +20M
     *A fine anno viene accreditato in cassa il Saldo Netto (Bonus - Manutenzione). Se una squadra non ha fondi per pagare la manutenzione, lo stadio viene **declassato** al livello inferiore.*
 
-    ### 5. Settore Giovanile (Panchina U21)
+    ### 6. Settore Giovanile (Panchina U21)
     Esiste una cassa parallela, separata da quella principale, dedicata ai giovani: **Budget U21 di 30M**.
     In questa panchina possono essere tesserati solo giocatori giovani presi dal listone. 
     Per poterli promuovere a tutti gli effetti come futuri titolari, il giovane **deve accumulare 5 presenze** (convocazioni a voto) durante la stagione. Svincolare un U21 rimborsa per intero il suo costo sul Budget U21.
 
-    ### 6. Partite, Gol e Multe
+    ### 7. Partite, Gol e Multe
     Il calcolo dei gol segue fasce matematiche rigorose:
     * Meno di **66 punti** = 0 Gol.
     * Da **66 punti** = 1 Gol.
     * Ogni **4 punti successivi** = +1 Gol (es. 70=2, 74=3, 78=4, ecc.).
     * **Multa Ritardo:** Se la formazione viene schierata in ritardo, scatta automaticamente una multa disciplinare di **5 M** sottratta dalla cassa societaria.
 
-    ### 7. Scambi e Prestiti
+    ### 8. Scambi e Prestiti
     Il mercato tra presidenti è libero ma sorvegliato:
     * **Scambi Definitivi:** Il differenziale delle quotazioni tra i giocatori scambiati non deve superare il 10%. Se lo supera, va obbligatoriamente compensato inserendo un "Conguaglio in Crediti".
     * **Prestiti:** I giocatori possono essere prestati ad altre squadre. Si può decidere con un cursore (da 0% a 100%) quanta percentuale dello stipendio verrà pagata da chi riceve il prestito a fine anno.
 
-    ### 8. Premi e Paracadute di Fine Stagione
+    ### 9. Premi e Paracadute di Fine Stagione
     A fine anno, dopo la 38° giornata, la cassa comune (costituita dalle quote di partecipazione) viene distribuita:
     * **1° Classificato:** 70% del montepremi.
     * **2° Classificato:** 30% del montepremi.
@@ -1543,8 +1594,8 @@ if st.session_state.is_admin:
                     
                     teams_to_update = set([t for t in [curr_team_id, new_team_id] if t is not None])
                     for t_id in teams_to_update:
-                        t_players_aggiornati = supabase.table("players").select("contract_years").eq("team_id", t_id).execute().data
-                        reale_somma_anni = sum([int(tp.get('contract_years') or 0) for tp in t_players_aggiornati])
+                        t_players_aggiornati = supabase.table("players").select("contract_years, future_contract_years").eq("team_id", t_id).execute().data
+                        reale_somma_anni = sum([int(tp.get('contract_years') or 0) + int(tp.get('future_contract_years') or 0) for tp in t_players_aggiornati])
                         supabase.table("teams").update({"total_contract_years": reale_somma_anni}).eq("id", t_id).execute()
                         
                     st.success(f"✅ Dati di {p_curr['name']} aggiornati correttamente!")
@@ -1594,8 +1645,8 @@ if st.session_state.is_admin:
                                     else:
                                         non_trovati.append(p_name)
                                         
-                                t_players_aggiornati = supabase.table("players").select("contract_years").eq("team_id", csv_team_id).execute().data
-                                reale_somma_anni = sum([int(tp.get('contract_years') or 0) for tp in t_players_aggiornati])
+                                t_players_aggiornati = supabase.table("players").select("contract_years, future_contract_years").eq("team_id", csv_team_id).execute().data
+                                reale_somma_anni = sum([int(tp.get('contract_years') or 0) + int(tp.get('future_contract_years') or 0) for tp in t_players_aggiornati])
                                 
                                 target_team = next(t for t in teams if t['id'] == csv_team_id)
                                 new_bal = int(round(float(target_team['balance'])))
@@ -1680,8 +1731,8 @@ if st.session_state.is_admin:
                     
                 for team_obj in teams:
                     t_id = team_obj['id']
-                    t_players_aggiornati = supabase.table("players").select("contract_years").eq("team_id", t_id).execute().data
-                    reale_somma_anni = sum([int(tp.get('contract_years') or 0) for tp in t_players_aggiornati])
+                    t_players_aggiornati = supabase.table("players").select("contract_years, future_contract_years").eq("team_id", t_id).execute().data
+                    reale_somma_anni = sum([int(tp.get('contract_years') or 0) + int(tp.get('future_contract_years') or 0) for tp in t_players_aggiornati])
                     supabase.table("teams").update({"total_contract_years": reale_somma_anni}).eq("id", t_id).execute()
                     
                 st.success("✅ Giocatore registrato all'estero: contratto conteggiato negli anni totali, ma stipendio escluso da monte ingaggi e cassa!")
@@ -1695,6 +1746,7 @@ if st.session_state.is_admin:
                 st.success("🇮🇹 Giocatore rientrato in Italia: stipendio regolarmente riattivato nel monte ingaggi!")
                 st.rerun()
 
+        # PROCEDURA DI FINE STAGIONE STEP-BY-STEP
         with st.expander("🏁 8. Procedura Guidata di Fine Stagione (In Ordine Rigoroso)"):
             st.write("Esegui le operazioni di chiusura stagione in ordine. Per ogni passaggio potrai decidere se applicarlo a tutte le squadre o escluderne alcune.")
             
@@ -1777,31 +1829,48 @@ if st.session_state.is_admin:
 
             st.divider()
 
-            st.markdown("#### 4️⃣ Passo 4: Svincolo Giocatori in Scadenza (Contratto $\le$ 1 Anno)")
-            st.write("Svincola automaticamente e rimette nel listone tutti i giocatori arrivati a fine contratto.")
-            opt_svincolo = st.radio("Vuoi eseguire lo svincolo automatico dei giocatori in scadenza per tutte le squadre?", ["Sì, a tutte le squadre", "No, escludi alcune squadre"], key="rad_svincolo")
+            st.markdown("#### 4️⃣ Passo 4: Svincolo Giocatori in Scadenza e Attivazione Rinnovi")
+            st.write("Svincola automaticamente i giocatori a fine contratto (1 anno rimasto). Se un giocatore è stato **Rinnovato** tramite il pulsante apposito nella rosa, NON verrà svincolato e il suo nuovo stipendio e anni diventeranno attivi.")
+            opt_svincolo = st.radio("Vuoi eseguire lo svincolo automatico per tutte le squadre?", ["Sì, a tutte le squadre", "No, escludi alcune squadre"], key="rad_svincolo")
             escluse_svincolo = []
             if opt_svincolo == "No, escludi alcune squadre":
                 escluse_svincolo = st.multiselect("Seleziona squadre da ESCLUDERE dallo svincolo automatico:", options=[t['id'] for t in teams], format_func=lambda x: team_names_map[x], key="ms_svincolo")
                 
-            if st.button("Svincola Giocatori in Scadenza ❌", key="btn_step4_svincolo"):
+            if st.button("Esegui Svincoli e Attiva Rinnovi ❌", key="btn_step4_svincolo"):
                 count_svincolati = 0
+                count_rinnovati = 0
                 for t in teams:
                     if t['id'] not in escluse_svincolo:
                         scadenti_team = [p for p in players if p.get('team_id') == t['id'] and int(p.get('contract_years') or 0) <= 1]
                         for sc_p in scadenti_team:
-                            upd_sv = {"team_id": None, "salary": None, "contract_years": None, "is_under_21": False}
-                            try:
-                                supabase.table("players").update({**upd_sv, "is_abroad": False}).eq("id", sc_p['id']).execute()
-                            except:
-                                supabase.table("players").update(upd_sv).eq("id", sc_p['id']).execute()
-                            count_svincolati += 1
+                            fut_sal = sc_p.get('future_salary')
+                            fut_yr = sc_p.get('future_contract_years')
                             
-                        t_aggiornati = supabase.table("players").select("contract_years").eq("team_id", t['id']).execute().data
-                        reale_somma = sum([int(tp.get('contract_years') or 0) for tp in t_aggiornati])
+                            if fut_sal and fut_yr:
+                                upd_rinnovo = {
+                                    "salary": int(fut_sal),
+                                    "contract_years": int(fut_yr),
+                                    "future_salary": None,
+                                    "future_contract_years": None
+                                }
+                                try:
+                                    supabase.table("players").update(upd_rinnovo).eq("id", sc_p['id']).execute()
+                                except:
+                                    pass
+                                count_rinnovati += 1
+                            else:
+                                upd_sv = {"team_id": None, "salary": None, "contract_years": None, "is_under_21": False, "future_salary": None, "future_contract_years": None}
+                                try:
+                                    supabase.table("players").update({**upd_sv, "is_abroad": False}).eq("id", sc_p['id']).execute()
+                                except:
+                                    supabase.table("players").update(upd_sv).eq("id", sc_p['id']).execute()
+                                count_svincolati += 1
+                            
+                        t_aggiornati = supabase.table("players").select("contract_years, future_contract_years").eq("team_id", t['id']).execute().data
+                        reale_somma = sum([int(tp.get('contract_years') or 0) + int(tp.get('future_contract_years') or 0) for tp in t_aggiornati])
                         supabase.table("teams").update({"total_contract_years": reale_somma}).eq("id", t['id']).execute()
                         
-                st.success(f"✅ Svincolati con successo {count_svincolati} giocatori arrivati a scadenza contratto!")
+                st.success(f"✅ Eseguiti {count_svincolati} svincoli per fine contratto e attivati {count_rinnovati} nuovi rinnovi!")
                 st.rerun()
 
             st.divider()
