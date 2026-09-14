@@ -125,11 +125,37 @@ if "authenticated" not in st.session_state:
     st.session_state.username = ""
     st.session_state.is_admin = False
     st.session_state.team_id = None
+    st.session_state.is_viewer = False
 
 if "mostra_cocco" not in st.session_state:
     st.session_state.mostra_cocco = False
 
-if not st.session_state.authenticated:
+# Gestione Automatica Modalità Visitatore
+if not st.session_state.authenticated and not st.session_state.is_viewer:
+    st.session_state.is_viewer = True
+
+with st.sidebar:
+    if st.session_state.authenticated:
+        st.write(f"Utente: **{st.session_state.username}**")
+        if st.session_state.is_admin:
+            st.info("🛠️ Ruolo: Amministratore")
+        else:
+            st.info("👤 Ruolo: Proprietario Squadra")
+        if st.button("Disconnetti 🚪"):
+            st.session_state.authenticated = False
+            st.session_state.username = ""
+            st.session_state.is_admin = False
+            st.session_state.team_id = None
+            st.session_state.is_viewer = True
+            st.rerun()
+    else:
+        st.write("Utente: **Visitatore**")
+        st.info("👁️ Ruolo: Sola Lettura")
+        if st.button("🔑 Effettua Login per Modifiche"):
+            st.session_state.show_login = True
+            st.rerun()
+
+if not st.session_state.authenticated and st.session_state.get("show_login", False):
     st.title("🔐 Accesso & Registrazione - FantaGestionale")
     
     tab_login, tab_register = st.tabs(["🔑 Accedi", "📝 Registra Nuova Squadra"])
@@ -152,6 +178,8 @@ if not st.session_state.authenticated:
                     st.session_state.authenticated = True
                     st.session_state.username = u_input
                     st.session_state.team_id = matched_team['id']
+                    st.session_state.is_viewer = False
+                    st.session_state.show_login = False
                     if a_input == ADMIN_SECRET_PWD:
                         st.session_state.is_admin = True
                         st.success("Accesso effettuato come Amministratore!")
@@ -170,6 +198,10 @@ if not st.session_state.authenticated:
             if st.button("Chiudi banner"):
                 st.session_state.mostra_cocco = False
                 st.rerun()
+                    
+        if st.button("⬅️ Torna alla modalità Visitatore"):
+            st.session_state.show_login = False
+            st.rerun()
                     
     with tab_register:
         st.write("Crea il profilo per la tua squadra inserendo i dati sottostanti:")
@@ -207,19 +239,7 @@ if not st.session_state.authenticated:
 st.title("🏆 Dashboard Fantacalcio Manageriale")
 
 with st.sidebar:
-    st.write(f"Utente: **{st.session_state.username}**")
     st.write(f"📅 Stagione: **{active_season}**")
-    if st.session_state.is_admin:
-        st.info("🛠️ Ruolo: Amministratore")
-    else:
-        st.info("👤 Ruolo: Utente Standard")
-    
-    if st.button("Disconnetti 🚪"):
-        st.session_state.authenticated = False
-        st.session_state.username = ""
-        st.session_state.is_admin = False
-        st.session_state.team_id = None
-        st.rerun()
 
 teams_res = supabase.table("teams").select("*").order("name").execute()
 teams = teams_res.data
@@ -246,18 +266,23 @@ try:
 except:
     fin_history_res = []
 
-# Definizione delle Tab 
+# Definizione delle Tab Dinamiche in base all'utente
 if st.session_state.is_admin:
-    tab1, tab_free, tab3, tab4, tab5, tab6, tab7, tab_report, tab_hof, tab8 = st.tabs([
+    tab1, tab_free, tab3, tab4, tab5, tab6, tab7, tab_report, tab_hof, tab_reg, tab8 = st.tabs([
         "📊 Dashboard & Finanze", "🔎 Svincolati & Variazioni", "📋 Rose & Svincoli", 
         "👶 Panchina U21", "🤝 Scambi & Prestiti", "⚽ Inserimento Giornate", 
-        "⚽ Mercato Admin", "📜 Report Attività", "🏛️ Albo d'Oro", "⚙️ Admin"
+        "⚽ Mercato Admin", "📜 Report Attività", "🏛️ Albo d'Oro", "📖 Regolamento", "⚙️ Admin"
     ])
-else:
-    tab1, tab_free, tab3, tab4, tab5, tab6, tab_report, tab_hof = st.tabs([
+elif st.session_state.authenticated:
+    tab1, tab_free, tab3, tab4, tab5, tab6, tab_report, tab_hof, tab_reg = st.tabs([
         "📊 Dashboard & Finanze", "🔎 Svincolati & Variazioni", "📋 La Mia Rosa & Previsioni", 
         "👶 Panchina U21", "🤝 Scambi & Prestiti", "⚽ Inserimento Giornate", 
-        "📜 Report Attività", "🏛️ Albo d'Oro"
+        "📜 Report Attività", "🏛️ Albo d'Oro", "📖 Regolamento"
+    ])
+else:
+    tab1, tab_free, tab3, tab_report, tab_hof, tab_reg = st.tabs([
+        "📊 Dashboard & Finanze", "🔎 Svincolati & Variazioni", "📋 Rose delle Squadre", 
+        "📜 Report Attività", "🏛️ Albo d'Oro", "📖 Regolamento"
     ])
 
 # TAB 1: DASHBOARD, CLASSIFICA, MONTEPREMI & GRAFICO FINANZIARIO AVANZATO
@@ -478,14 +503,17 @@ with tab_free:
         else:
             st.info("Nessun giocatore ha attualmente un valore di mercato diverso dal proprio stipendio d'acquisto.")
 
-# TAB 3: ROSE ORDINATE PER RUOLO, SVINCOLI & CESSIONI ALL'ESTERO
+# TAB 3: ROSE ORDINATE PER RUOLO E AZIONI (CON MODIFICA MULTIPLA ADMIN E ACCESSO VISITATORE)
 with tab3:
     if st.session_state.is_admin:
-        st.header("Gestione Rose (Admin)")
-        selected_team_id = st.selectbox("Seleziona Squadra", options=[t['id'] for t in teams], format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), key="select_squadra_rose")
-    else:
+        st.header("Gestione Rose & Modifica Massiva (Admin)")
+        selected_team_id = st.selectbox("Seleziona Squadra", options=[t['id'] for t in teams], format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), key="select_squadra_rose_admin")
+    elif st.session_state.authenticated:
         selected_team_id = st.session_state.team_id
         st.header("La Mia Rosa & Dashboard Preventiva (Lungo Termine)")
+    else:
+        st.header("Rose delle Squadre")
+        selected_team_id = st.selectbox("Seleziona Squadra da ispezionare", options=[t['id'] for t in teams], format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), key="select_squadra_rose_viewer")
 
     if teams:
         raw_team_players = [p for p in players if p.get('team_id') == selected_team_id]
@@ -501,8 +529,11 @@ with tab3:
             h3.markdown("**Q. Attuale**")
             h4.markdown("**Variazione**")
             h5.markdown("**Contratto**")
-            h6.markdown("**Azioni**")
+            if st.session_state.authenticated:
+                h6.markdown("**Azioni**")
             st.divider()
+
+            updated_players = {}
 
             for p in team_players:
                 col1, col2, col3, col4, col5, col6 = st.columns([2, 1, 1, 1, 1, 1])
@@ -516,11 +547,30 @@ with tab3:
                 
                 stipendio_contratto = int(round(float(p.get('salary') or 0)))
                 quotazione_attuale = int(round(float(p.get('current_fg_value') or 0)))
+                anni_res_p = int(p.get('contract_years') or 0)
                 
-                if is_abroad_flag:
-                    col2.markdown(f"~~{stipendio_contratto} M~~ <br><small style='color:#e67e22'>Congelato</small>", unsafe_allow_html=True)
+                # Modifica massiva per Admin
+                if st.session_state.is_admin:
+                    if is_abroad_flag:
+                        col2.markdown(f"~~{stipendio_contratto} M~~ <br><small style='color:#e67e22'>Congelato</small>", unsafe_allow_html=True)
+                        new_sal = stipendio_contratto
+                    else:
+                        new_sal = col2.number_input("Sal", min_value=0, value=stipendio_contratto, step=1, key=f"sal_{p['id']}", label_visibility="collapsed")
+                    
+                    new_yr = col5.number_input("Anni", min_value=0, max_value=5, value=anni_res_p, step=1, key=f"yr_{p['id']}", label_visibility="collapsed")
+                    
+                    updated_players[p['id']] = {"salary": new_sal, "contract_years": new_yr, "old_salary": stipendio_contratto, "old_years": anni_res_p}
                 else:
-                    col2.write(f"{stipendio_contratto} M")
+                    if is_abroad_flag:
+                        col2.markdown(f"~~{stipendio_contratto} M~~ <br><small style='color:#e67e22'>Congelato</small>", unsafe_allow_html=True)
+                    else:
+                        col2.write(f"{stipendio_contratto} M")
+                    
+                    if anni_res_p <= 1:
+                        col5.markdown(f"**{anni_res_p} anni** ‼️")
+                    else:
+                        col5.write(f"{anni_res_p} anni")
+                
                 col3.write(f"{quotazione_attuale} M")
                 
                 differenza = quotazione_attuale - stipendio_contratto
@@ -531,65 +581,79 @@ with tab3:
                 else:
                     col4.markdown("<span style='color: #7f8c8d;'>0 M</span>", unsafe_allow_html=True)
                 
-                anni_res_p = int(p.get('contract_years') or 0)
-                if anni_res_p <= 1:
-                    col5.markdown(f"**{anni_res_p} anni** ‼️")
-                else:
-                    col5.write(f"{anni_res_p} anni")
-                
-                btn_svincola = col6.button("Svincola ❌", key=f"svincola_{p['id']}")
-                btn_estero = col6.button("Cedi Estero ✈️", key=f"estero_{p['id']}")
-                
-                if btn_svincola:
-                    penale = calcola_10_percento(stipendio_contratto)
-                    cassa_team_attuale = int(round(float(team_data['balance'])))
-                    nuova_cassa = cassa_team_attuale - penale
-                    nuovi_anni = int(team_data['total_contract_years']) - int(p.get('contract_years') or 0)
+                # Azioni per Admin o Proprietario
+                if st.session_state.is_admin or (st.session_state.authenticated and selected_team_id == st.session_state.team_id):
+                    btn_svincola = col6.button("Svincola ❌", key=f"svincola_{p['id']}")
+                    btn_estero = col6.button("Cedi Estero ✈️", key=f"estero_{p['id']}")
                     
-                    if nuova_cassa < 0:
-                        st.error(f"Fondi insufficienti per pagare la penale ({penale}M).")
-                    else:
+                    if btn_svincola:
+                        penale = calcola_10_percento(stipendio_contratto)
+                        cassa_team_attuale = int(round(float(team_data['balance'])))
+                        nuova_cassa = cassa_team_attuale - penale
+                        nuovi_anni = int(team_data['total_contract_years']) - int(p.get('contract_years') or 0)
+                        
+                        if nuova_cassa < 0:
+                            st.error(f"Fondi insufficienti per pagare la penale ({penale}M).")
+                        else:
+                            try:
+                                supabase.table("transfer_history").insert({"player_name": p['name'], "team_id": selected_team_id}).execute()
+                            except:
+                                pass
+                                
+                            upd_svinc = {"team_id": None, "salary": None, "contract_years": None, "is_under_21": False}
+                            try:
+                                supabase.table("players").update({**upd_svinc, "is_abroad": False}).eq("id", p['id']).execute()
+                            except:
+                                supabase.table("players").update(upd_svinc).eq("id", p['id']).execute()
+                                
+                            supabase.table("teams").update({"balance": int(nuova_cassa), "total_contract_years": int(nuovi_anni)}).eq("id", selected_team_id).execute()
+                            registra_snapshot_finanziario(selected_team_id, f"Svincolo {p['name']}", nuova_cassa)
+                            st.success(f"{p['name']} svincolato!")
+                            st.rerun()
+                            
+                    if btn_estero:
+                        p_price = int(round(float(p.get('purchase_price') or stipendio_contratto)))
+                        tot_anni = int(p.get('initial_contract_years') or 3)
+                        anni_res = int(p.get('contract_years') or 1)
+                        valore_residuo = int(round((p_price / max(1, tot_anni)) * anni_res))
+                        
+                        cassa_team_attuale = int(round(float(team_data['balance'])))
+                        nuova_cassa = cassa_team_attuale + valore_residuo
+                        nuovi_anni = int(team_data['total_contract_years']) - int(p.get('contract_years') or 0)
+                        
                         try:
                             supabase.table("transfer_history").insert({"player_name": p['name'], "team_id": selected_team_id}).execute()
                         except:
                             pass
                             
-                        upd_svinc = {"team_id": None, "salary": None, "contract_years": None, "is_under_21": False}
+                        upd_estero = {"team_id": None, "salary": None, "contract_years": None, "is_under_21": False}
                         try:
-                            supabase.table("players").update({**upd_svinc, "is_abroad": False}).eq("id", p['id']).execute()
+                            supabase.table("players").update({**upd_estero, "is_abroad": False}).eq("id", p['id']).execute()
                         except:
-                            supabase.table("players").update(upd_svinc).eq("id", p['id']).execute()
+                            supabase.table("players").update(upd_estero).eq("id", p['id']).execute()
                             
                         supabase.table("teams").update({"balance": int(nuova_cassa), "total_contract_years": int(nuovi_anni)}).eq("id", selected_team_id).execute()
-                        registra_snapshot_finanziario(selected_team_id, f"Svincolo {p['name']}", nuova_cassa)
-                        st.success(f"{p['name']} svincolato!")
+                        registra_snapshot_finanziario(selected_team_id, f"Cessione Estero {p['name']}", nuova_cassa)
+                        st.success(f"✈️ {p['name']} ceduto all'estero! Incassati {valore_residuo}M (valore residuo ammortato).")
                         st.rerun()
-                        
-                if btn_estero:
-                    p_price = int(round(float(p.get('purchase_price') or stipendio_contratto)))
-                    tot_anni = int(p.get('initial_contract_years') or 3)
-                    anni_res = int(p.get('contract_years') or 1)
-                    valore_residuo = int(round((p_price / max(1, tot_anni)) * anni_res))
+
+            if st.session_state.is_admin and team_players:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("💾 Salva Tutte le Modifiche alla Rosa (Stipendi e Anni)", type="primary", use_container_width=True):
+                    changes_made = False
+                    for pid, data in updated_players.items():
+                        if data['salary'] != data['old_salary'] or data['contract_years'] != data['old_years']:
+                            supabase.table("players").update({"salary": data['salary'], "contract_years": data['contract_years']}).eq("id", pid).execute()
+                            changes_made = True
                     
-                    cassa_team_attuale = int(round(float(team_data['balance'])))
-                    nuova_cassa = cassa_team_attuale + valore_residuo
-                    nuovi_anni = int(team_data['total_contract_years']) - int(p.get('contract_years') or 0)
-                    
-                    try:
-                        supabase.table("transfer_history").insert({"player_name": p['name'], "team_id": selected_team_id}).execute()
-                    except:
-                        pass
-                        
-                    upd_estero = {"team_id": None, "salary": None, "contract_years": None, "is_under_21": False}
-                    try:
-                        supabase.table("players").update({**upd_estero, "is_abroad": False}).eq("id", p['id']).execute()
-                    except:
-                        supabase.table("players").update(upd_estero).eq("id", p['id']).execute()
-                        
-                    supabase.table("teams").update({"balance": int(nuova_cassa), "total_contract_years": int(nuovi_anni)}).eq("id", selected_team_id).execute()
-                    registra_snapshot_finanziario(selected_team_id, f"Cessione Estero {p['name']}", nuova_cassa)
-                    st.success(f"✈️ {p['name']} ceduto all'estero! Incassati {valore_residuo}M (valore residuo ammortato).")
-                    st.rerun()
+                    if changes_made:
+                        t_players_aggiornati = supabase.table("players").select("contract_years").eq("team_id", selected_team_id).execute().data
+                        reale_somma_anni = sum([int(tp.get('contract_years') or 0) for tp in t_players_aggiornati])
+                        supabase.table("teams").update({"total_contract_years": reale_somma_anni}).eq("id", selected_team_id).execute()
+                        st.success("✅ Modifiche multiple salvate con successo!")
+                        st.rerun()
+                    else:
+                        st.info("Nessuna modifica rilevata nei campi della rosa.")
 
             st.markdown("---")
             st.subheader("🔮 Dashboard Preventiva & Analisi Contrattuale (Prossima Stagione)")
@@ -605,338 +669,350 @@ with tab3:
             p_col3.metric("Anni Contratto Occupati (Inc. Estero)", f"{anni_residui_totali} / {int(rules['max_contract_years'])}")
 
 # TAB 4: PANCHINA UNDER 21
-with tab4:
-    if st.session_state.is_admin:
-        st.header("👶 Gestione Panchina Under 21 (Admin)")
-        selected_u21_team_id = st.selectbox("Seleziona Squadra", options=[t['id'] for t in teams], format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), key="select_u21_team_admin")
-    else:
-        selected_u21_team_id = st.session_state.team_id
-        st.header("👶 La Tua Panchina Under 21 (Budget Separato 30M)")
-
-    if teams:
-        team_u21_data = next(t for t in teams if t['id'] == selected_u21_team_id)
-        current_u21_balance = int(round(float(team_u21_data.get('u21_balance', 30))))
-        
-        st.write(f"💰 **Budget U21 Residuo:** {current_u21_balance} M / 30 M")
-        
-        squad_u21 = [u for u in u21_players if u.get('team_id') == selected_u21_team_id]
-        
-        if squad_u21:
-            st.write("**Rosa Under 21 Attuale:**")
-            u_cols1, u_cols2, u_cols3, u_cols4, u_cols5 = st.columns([2, 1, 1, 1, 1])
-            u_cols1.markdown("**Giovane**")
-            u_cols2.markdown("**Ruolo**")
-            u_cols3.markdown("**Costo U21**")
-            u_cols4.markdown("**Presenze/Convocazioni**")
-            u_cols5.markdown("**Azione**")
-            st.divider()
-            
-            for g in squad_u21:
-                col_u1, col_u2, col_u3, col_u4, col_u5 = st.columns([2, 1, 1, 1, 1])
-                col_u1.markdown(f"👶 **{g['name']}** ({g.get('serie_a_team', '')})")
-                col_u2.markdown(render_role_badge(g.get('roles', '')), unsafe_allow_html=True)
-                col_u3.write(f"{int(round(float(g.get('budget_used') or 0)))} M")
-                
-                presenze = int(g.get('presenze') or 0)
-                stato_presenze = f"🔥 {presenze} / 5" if presenze < 5 else f"✅ {presenze} / 5 (Obbligo Contratto Raggiunto!)"
-                col_u4.write(stato_presenze)
-                
-                if st.session_state.is_admin:
-                    if col_u5.button("Svincola U21 ❌", key=f"svincola_u21_{g['id']}"):
-                        refund = int(round(float(g.get('budget_used') or 0)))
-                        supabase.table("teams").update({"u21_balance": current_u21_balance + refund}).eq("id", selected_u21_team_id).execute()
-                        supabase.table("u21_players").delete().eq("id", g['id']).execute()
-                        st.success(f"{g['name']} svincolato dalla U21!")
-                        st.rerun()
-                else:
-                    col_u5.write("Gestito da Admin")
-        else:
-            st.info("Nessun giovane Under 21 tesserato in questa panchina.")
-            
+if st.session_state.authenticated:
+    with tab4:
         if st.session_state.is_admin:
-            st.markdown("---")
-            st.subheader("➕ Ingaggia Giovane in Panchina U21 (Admin)")
-            svincolati_listone = [p for p in players if p.get('team_id') is None]
+            st.header("👶 Gestione Panchina Under 21 (Admin)")
+            selected_u21_team_id = st.selectbox("Seleziona Squadra", options=[t['id'] for t in teams], format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), key="select_u21_team_admin")
+        else:
+            selected_u21_team_id = st.session_state.team_id
+            st.header("👶 La Tua Panchina Under 21 (Budget Separato 30M)")
+
+        if teams:
+            team_u21_data = next(t for t in teams if t['id'] == selected_u21_team_id)
+            current_u21_balance = int(round(float(team_u21_data.get('u21_balance', 30))))
             
-            if svincolati_listone:
-                with st.form("acquista_u21_form"):
-                    svincolati_ordinati = sorted(svincolati_listone, key=lambda x: x['name'])
-                    selected_u21_player = st.selectbox(
-                        "Seleziona Giovane dal Listone Svincolati",
-                        options=[p['id'] for p in svincolati_ordinati],
-                        format_func=lambda x: next(f"{p['name']} | Ruolo: {p.get('roles', 'N/D')} | Squadra: {p.get('serie_a_team', 'N/D')}" for p in svincolati_ordinati if p['id'] == x)
-                    )
-                    costo_u21 = st.number_input("Costo d'Acquisto dal Budget U21 (M)", min_value=1, max_value=int(max(1, current_u21_balance)), value=1, step=1)
+            st.write(f"💰 **Budget U21 Residuo:** {current_u21_balance} M / 30 M")
+            
+            squad_u21 = [u for u in u21_players if u.get('team_id') == selected_u21_team_id]
+            
+            if squad_u21:
+                st.write("**Rosa Under 21 Attuale:**")
+                u_cols1, u_cols2, u_cols3, u_cols4, u_cols5 = st.columns([2, 1, 1, 1, 1])
+                u_cols1.markdown("**Giovane**")
+                u_cols2.markdown("**Ruolo**")
+                u_cols3.markdown("**Costo U21**")
+                u_cols4.markdown("**Presenze/Convocazioni**")
+                u_cols5.markdown("**Azione**")
+                st.divider()
+                
+                for g in squad_u21:
+                    col_u1, col_u2, col_u3, col_u4, col_u5 = st.columns([2, 1, 1, 1, 1])
+                    col_u1.markdown(f"👶 **{g['name']}** ({g.get('serie_a_team', '')})")
+                    col_u2.markdown(render_role_badge(g.get('roles', '')), unsafe_allow_html=True)
+                    col_u3.write(f"{int(round(float(g.get('budget_used') or 0)))} M")
                     
-                    if st.form_submit_button("Aggiungi alla Panchina U21 ✍️"):
-                        p_obj = next(p for p in svincolati_listone if p['id'] == selected_u21_player)
-                        
-                        if current_u21_balance < costo_u21:
-                            st.error("❌ Budget U21 insufficiente (massimo 30M totali).")
-                        else:
-                            supabase.table("u21_players").insert({
-                                "name": p_obj['name'],
-                                "roles": p_obj.get('roles', ''),
-                                "serie_a_team": p_obj.get('serie_a_team', ''),
-                                "team_id": selected_u21_team_id,
-                                "budget_used": int(costo_u21),
-                                "presenze": 0
-                            }).execute()
-                            
-                            supabase.table("teams").update({
-                                "u21_balance": int(current_u21_balance - costo_u21)
-                            }).eq("id", selected_u21_team_id).execute()
-                            
-                            supabase.table("players").update({"team_id": selected_u21_team_id, "salary": 0, "contract_years": 0, "is_under_21": True}).eq("id", selected_u21_player).execute()
-                            
-                            st.success(f"✅ {p_obj['name']} inserito con successo nella Panchina U21!")
+                    presenze = int(g.get('presenze') or 0)
+                    stato_presenze = f"🔥 {presenze} / 5" if presenze < 5 else f"✅ {presenze} / 5 (Obbligo Contratto Raggiunto!)"
+                    col_u4.write(stato_presenze)
+                    
+                    if st.session_state.is_admin:
+                        if col_u5.button("Svincola U21 ❌", key=f"svincola_u21_{g['id']}"):
+                            refund = int(round(float(g.get('budget_used') or 0)))
+                            supabase.table("teams").update({"u21_balance": current_u21_balance + refund}).eq("id", selected_u21_team_id).execute()
+                            supabase.table("u21_players").delete().eq("id", g['id']).execute()
+                            st.success(f"{g['name']} svincolato dalla U21!")
                             st.rerun()
+                    else:
+                        col_u5.write("Gestito da Admin")
+            else:
+                st.info("Nessun giovane Under 21 tesserato in questa panchina.")
+                
+            if st.session_state.is_admin:
+                st.markdown("---")
+                st.subheader("➕ Ingaggia Giovane in Panchina U21 (Admin)")
+                svincolati_listone = [p for p in players if p.get('team_id') is None]
+                
+                if svincolati_listone:
+                    with st.form("acquista_u21_form"):
+                        svincolati_ordinati = sorted(svincolati_listone, key=lambda x: x['name'])
+                        selected_u21_player = st.selectbox(
+                            "Seleziona Giovane dal Listone Svincolati",
+                            options=[p['id'] for p in svincolati_ordinati],
+                            format_func=lambda x: next(f"{p['name']} | Ruolo: {p.get('roles', 'N/D')} | Squadra: {p.get('serie_a_team', 'N/D')}" for p in svincolati_ordinati if p['id'] == x)
+                        )
+                        costo_u21 = st.number_input("Costo d'Acquisto dal Budget U21 (M)", min_value=1, max_value=int(max(1, current_u21_balance)), value=1, step=1)
+                        
+                        if st.form_submit_button("Aggiungi alla Panchina U21 ✍️"):
+                            p_obj = next(p for p in svincolati_listone if p['id'] == selected_u21_player)
+                            
+                            if current_u21_balance < costo_u21:
+                                st.error("❌ Budget U21 insufficiente (massimo 30M totali).")
+                            else:
+                                supabase.table("u21_players").insert({
+                                    "name": p_obj['name'],
+                                    "roles": p_obj.get('roles', ''),
+                                    "serie_a_team": p_obj.get('serie_a_team', ''),
+                                    "team_id": selected_u21_team_id,
+                                    "budget_used": int(costo_u21),
+                                    "presenze": 0
+                                }).execute()
+                                
+                                supabase.table("teams").update({
+                                    "u21_balance": int(current_u21_balance - costo_u21)
+                                }).eq("id", selected_u21_team_id).execute()
+                                
+                                supabase.table("players").update({"team_id": selected_u21_team_id, "salary": 0, "contract_years": 0, "is_under_21": True}).eq("id", selected_u21_player).execute()
+                                
+                                st.success(f"✅ {p_obj['name']} inserito con successo nella Panchina U21!")
+                                st.rerun()
 
 # TAB 5: SCAMBI & PRESTITI
-with tab5:
-    st.header("🤝 Mercato Avanzato: Scambi & Prestiti")
-    
-    if not teams:
-        st.warning("Nessuna squadra presente.")
-    else:
-        if st.session_state.is_admin:
-            user_team_id = st.selectbox(
-                "Seleziona la tua squadra (Sei Admin)", 
-                options=[t['id'] for t in teams], 
-                format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), 
-                key="admin_trade_sender"
-            )
+if st.session_state.authenticated:
+    with tab5:
+        st.header("🤝 Mercato Avanzato: Scambi & Prestiti")
+        
+        if not teams:
+            st.warning("Nessuna squadra presente.")
         else:
-            user_team_id = st.session_state.team_id
-        
-        tab_scambio, tab_prestito, tab_storico_scambi = st.tabs(["🔄 Proponi Scambio Diretto", "📋 Gestione Prestiti", "📨 Richieste Scambio Ricevute"])
-        
-        with tab_scambio:
-            st.write("Crea una proposta di scambio con un'altra squadra. *Nota: Il differenziale delle quotazioni Mantra tra i giocatori scambiati non deve superare il 10%, altrimenti va colmato con un conguaglio in crediti interi.*")
-            
-            ricevente_id = st.selectbox("Squadra Destinataria", options=[t['id'] for t in teams if t['id'] != user_team_id], format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), key="sel_ricevente_scambio")
-            
-            with st.form("proponi_scambio_form"):
-                miei_giocatori = [p for p in players if p.get('team_id') == user_team_id]
-                miei_offerti = st.multiselect("Seleziona tuoi giocatori da OFFRIRE", options=miei_giocatori, format_func=lambda x: f"{x['name']} (Q: {int(round(float(x.get('current_fg_value') or 1)))}M)")
-                
-                giocatori_altra = [p for p in players if p.get('team_id') == ricevente_id]
-                loro_richiesti = st.multiselect("Seleziona giocatori da RICHIEDERE", options=giocatori_altra, format_func=lambda x: f"{x['name']} (Q: {int(round(float(x.get('current_fg_value') or 1)))}M)")
-                
-                conguaglio = st.number_input("Conguaglio in Crediti Interi (positivo se paghi tu, negativo se ricevi)", value=0, step=1)
-                
-                if st.form_submit_button("Invia Proposta di Scambio 🤝"):
-                    if not miei_offerti or not loro_richiesti:
-                        st.error("Seleziona almeno un giocatore da offrire e uno da richiedere.")
-                    else:
-                        valore_offerto = sum([int(round(float(p.get('current_fg_value') or 1))) for p in miei_offerti]) + int(conguaglio)
-                        valore_richiesto = sum([int(round(float(p.get('current_fg_value') or 1))) for p in loro_richiesti])
-                        
-                        differenza = abs(valore_offerto - valore_richiesto)
-                        tolleranza = max(valore_offerto, valore_richiesto) * 0.10
-                        
-                        if differenza > tolleranza:
-                            st.error(f"❌ Scambio non valido: il differenziale di valore supera il 10% consentito (Delta: {differenza}M, Max tollerato: {int(round(tolleranza))}M). Aggiusta il conguaglio!")
-                        else:
-                            offerti_str = ",".join([str(p['id']) for p in miei_offerti])
-                            richiesti_str = ",".join([str(p['id']) for p in loro_richiesti])
-                            
-                            supabase.table("trades").insert({
-                                "sender_team_id": user_team_id,
-                                "receiver_team_id": ricevente_id,
-                                "offered_player_ids": offerti_str,
-                                "requested_player_ids": richiesti_str,
-                                "cash_adjustment": int(conguaglio),
-                                "status": "In Attesa",
-                                "season": active_season
-                            }).execute()
-                            st.success("✅ Proposta di scambio inviata con successo!")
-                            st.rerun()
-
-        with tab_prestito:
-            st.write("Gestisci i prestiti dei giocatori (con divisione dello stipendio e blocco dello svincolo unilaterale).")
-            
-            proprietario_id = st.selectbox("Squadra Proprietaria del Cartellino", options=[t['id'] for t in teams], format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), key="sel_proprietario_prestito")
-            giocatori_prop = [p for p in players if p.get('team_id') == proprietario_id]
-            
-            if giocatori_prop:
-                giocatore_prestito_id = st.selectbox("Giocatore in Prestito", options=[p['id'] for p in giocatori_prop], format_func=lambda x: next(f"{p['name']} (Stipendio: {int(round(float(p.get('salary') or 0)))}M)" for p in giocatori_prop if p['id'] == x), key="sel_gioc_prestito")
-                destinatario_prestito_id = st.selectbox("Squadra Prestataria (Chi riceve)", options=[t['id'] for t in teams if t['id'] != proprietario_id], format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), key="sel_dest_prestito")
-                perc_stipendio = st.slider("Percentuale di stipendio pagata dalla squadra in prestito (%)", min_value=0, max_value=100, value=100, step=10, key="slider_perc_prestito")
-                
-                if st.button("Formalizza Prestito 📋", key="btn_formalizza_prestito"):
-                    supabase.table("loans").insert({
-                        "player_id": giocatore_prestito_id,
-                        "owner_team_id": proprietario_id,
-                        "borrower_team_id": destinatario_prestito_id,
-                        "salary_percentage_borrower": int(perc_stipendio),
-                        "season": active_season
-                    }).execute()
-                    supabase.table("players").update({"team_id": destinatario_prestito_id}).eq("id", giocatore_prestito_id).execute()
-                    st.success("✅ Contratto di prestito registrato! Il giocatore è stato trasferito temporaneamente e protetto da svincolo unilaterale.")
-                    st.rerun()
+            if st.session_state.is_admin:
+                user_team_id = st.selectbox(
+                    "Seleziona la tua squadra (Sei Admin)", 
+                    options=[t['id'] for t in teams], 
+                    format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), 
+                    key="admin_trade_sender"
+                )
             else:
-                st.info("La squadra selezionata non ha giocatori in rosa.")
-                
-            st.write("**Prestiti Attivi:**")
-            if loans_res:
-                for l in loans_res:
-                    p_obj = next((p for p in players if p['id'] == l['player_id']), None)
-                    owner_obj = next((t for t in teams if t['id'] == l['owner_team_id']), None)
-                    borrower_obj = next((t for t in teams if t['id'] == l['borrower_team_id']), None)
-                    if p_obj and owner_obj and borrower_obj:
-                        st.markdown(f"- 📋 **{p_obj['name']}** (Proprietario: {owner_obj['name']} ➔ In prestito a: {borrower_obj['name']} | Stipendio a carico del prestatario: {l['salary_percentage_borrower']}%)")
-            else:
-                st.info("Nessun prestito attivo registrato.")
-
-        with tab_storico_scambi:
-            st.write("Proposte di scambio ricevute:")
-            mie_proposte = [t for t in trades_res if t['receiver_team_id'] == user_team_id and t['status'] == 'In Attesa']
+                user_team_id = st.session_state.team_id
             
-            if mie_proposte:
-                for tr in mie_proposte:
-                    sender_obj = next((t for t in teams if t['id'] == tr['sender_team_id']), None)
-                    st.write(f"Proposta da parte di **{sender_obj['name'] if sender_obj else 'Altra Squadra'}** | Conguaglio: {int(round(float(tr.get('cash_adjustment') or 0)))}M")
+            tab_scambio, tab_prestito, tab_storico_scambi = st.tabs(["🔄 Proponi Scambio Diretto", "📋 Gestione Prestiti", "📨 Richieste Scambio Ricevute"])
+            
+            with tab_scambio:
+                st.write("Crea una proposta di scambio con un'altra squadra. *Nota: Il differenziale delle quotazioni Mantra tra i giocatori scambiati non deve superare il 10%, altrimenti va colmato con un conguaglio in crediti interi.*")
+                
+                ricevente_id = st.selectbox("Squadra Destinataria", options=[t['id'] for t in teams if t['id'] != user_team_id], format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), key="sel_ricevente_scambio")
+                
+                with st.form("proponi_scambio_form"):
+                    miei_giocatori = [p for p in players if p.get('team_id') == user_team_id]
+                    miei_offerti = st.multiselect("Seleziona tuoi giocatori da OFFRIRE", options=miei_giocatori, format_func=lambda x: f"{x['name']} (Q: {int(round(float(x.get('current_fg_value') or 1)))}M)")
                     
-                    col_acc, col_rif = st.columns(2)
-                    if col_acc.button("Accetta Scambio ✅", key=f"acc_{tr['id']}"):
-                        offerti_ids = [int(i) for i in tr['offered_player_ids'].split(',') if i]
-                        richiesti_ids = [int(i) for i in tr['requested_player_ids'].split(',') if i]
-                        
-                        for pid in offerti_ids:
-                            supabase.table("players").update({"team_id": tr['receiver_team_id']}).eq("id", pid).execute()
-                        for pid in richiesti_ids:
-                            supabase.table("players").update({"team_id": tr['sender_team_id']}).eq("id", pid).execute()
+                    giocatori_altra = [p for p in players if p.get('team_id') == ricevente_id]
+                    loro_richiesti = st.multiselect("Seleziona giocatori da RICHIEDERE", options=giocatori_altra, format_func=lambda x: f"{x['name']} (Q: {int(round(float(x.get('current_fg_value') or 1)))}M)")
+                    
+                    conguaglio = st.number_input("Conguaglio in Crediti Interi (positivo se paghi tu, negativo se ricevi)", value=0, step=1)
+                    
+                    if st.form_submit_button("Invia Proposta di Scambio 🤝"):
+                        if not miei_offerti or not loro_richiesti:
+                            st.error("Seleziona almeno un giocatore da offrire e uno da richiedere.")
+                        else:
+                            valore_offerto = sum([int(round(float(p.get('current_fg_value') or 1))) for p in miei_offerti]) + int(conguaglio)
+                            valore_richiesto = sum([int(round(float(p.get('current_fg_value') or 1))) for p in loro_richiesti])
                             
-                        supabase.table("trades").update({"status": "Accettato"}).eq("id", tr['id']).execute()
-                        st.success("Scambio accettato e completato con successo!")
-                        st.rerun()
+                            differenza = abs(valore_offerto - valore_richiesto)
+                            tolleranza = max(valore_offerto, valore_richiesto) * 0.10
+                            
+                            if differenza > tolleranza:
+                                st.error(f"❌ Scambio non valido: il differenziale di valore supera il 10% consentito (Delta: {differenza}M, Max tollerato: {int(round(tolleranza))}M). Aggiusta il conguaglio!")
+                            else:
+                                offerti_str = ",".join([str(p['id']) for p in miei_offerti])
+                                richiesti_str = ",".join([str(p['id']) for p in loro_richiesti])
+                                try:
+                                    supabase.table("trades").insert({
+                                        "sender_team_id": user_team_id,
+                                        "receiver_team_id": ricevente_id,
+                                        "offered_player_ids": offerti_str,
+                                        "requested_player_ids": richiesti_str,
+                                        "cash_adjustment": int(conguaglio),
+                                        "status": "In Attesa",
+                                        "season": active_season
+                                    }).execute()
+                                    st.success("✅ Proposta di scambio inviata con successo!")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"⚠️ Errore durante l'invio della proposta di scambio.")
+                                    st.info("💡 Assicurati che la tabella 'trades' esista e non abbia blocchi RLS. Vai nell'SQL Editor di Supabase ed esegui:\n`ALTER TABLE public.trades DISABLE ROW LEVEL SECURITY;`")
+
+            with tab_prestito:
+                st.write("Gestisci i prestiti dei giocatori (con divisione dello stipendio e blocco dello svincolo unilaterale).")
+                
+                proprietario_id = st.selectbox("Squadra Proprietaria del Cartellino", options=[t['id'] for t in teams], format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), key="sel_proprietario_prestito")
+                giocatori_prop = [p for p in players if p.get('team_id') == proprietario_id]
+                
+                with st.form("registra_prestito_form"):
+                    if giocatori_prop:
+                        giocatore_prestito_id = st.selectbox("Giocatore in Prestito", options=[p['id'] for p in giocatori_prop], format_func=lambda x: next(f"{p['name']} (Stipendio: {int(round(float(p.get('salary') or 0)))}M)" for p in giocatori_prop if p['id'] == x), key="sel_gioc_prestito")
+                        destinatario_prestito_id = st.selectbox("Squadra Prestataria (Chi riceve)", options=[t['id'] for t in teams if t['id'] != proprietario_id], format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), key="sel_dest_prestito")
+                        perc_stipendio = st.slider("Percentuale di stipendio pagata dalla squadra in prestito (%)", min_value=0, max_value=100, value=100, step=10, key="slider_perc_prestito")
                         
-                    if col_rif.button("Rifiuta ❌", key=f"rif_{tr['id']}"):
-                        supabase.table("trades").update({"status": "Rifiutato"}).eq("id", tr['id']).execute()
-                        st.warning("Scambio rifiutato.")
-                        st.rerun()
-            else:
-                st.info("Nessuna proposta di scambio in attesa.")
+                        if st.form_submit_button("Formalizza Prestito 📋"):
+                            try:
+                                supabase.table("loans").insert({
+                                    "player_id": giocatore_prestito_id,
+                                    "owner_team_id": proprietario_id,
+                                    "borrower_team_id": destinatario_prestito_id,
+                                    "salary_percentage_borrower": int(perc_stipendio),
+                                    "season": active_season
+                                }).execute()
+                                supabase.table("players").update({"team_id": destinatario_prestito_id}).eq("id", giocatore_prestito_id).execute()
+                                st.success("✅ Contratto di prestito registrato! Il giocatore è stato trasferito temporaneamente e protetto da svincolo unilaterale.")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"⚠️ Errore di connessione al database durante la registrazione del prestito.")
+                                st.info("💡 Assicurati che la tabella 'loans' esista e non abbia blocchi RLS. Vai nell'SQL Editor di Supabase ed esegui:\n`ALTER TABLE public.loans DISABLE ROW LEVEL SECURITY;`")
+                    else:
+                        st.info("La squadra selezionata non ha giocatori in rosa.")
+                        st.form_submit_button("Formalizza Prestito 📋", disabled=True)
+                        
+                st.write("**Prestiti Attivi:**")
+                if loans_res:
+                    for l in loans_res:
+                        p_obj = next((p for p in players if p['id'] == l['player_id']), None)
+                        owner_obj = next((t for t in teams if t['id'] == l['owner_team_id']), None)
+                        borrower_obj = next((t for t in teams if t['id'] == l['borrower_team_id']), None)
+                        if p_obj and owner_obj and borrower_obj:
+                            st.markdown(f"- 📋 **{p_obj['name']}** (Proprietario: {owner_obj['name']} ➔ In prestito a: {borrower_obj['name']} | Stipendio a carico del prestatario: {l['salary_percentage_borrower']}%)")
+                else:
+                    st.info("Nessun prestito attivo registrato.")
+
+            with tab_storico_scambi:
+                st.write("Proposte di scambio ricevute:")
+                mie_proposte = [t for t in trades_res if t['receiver_team_id'] == user_team_id and t['status'] == 'In Attesa']
+                
+                if mie_proposte:
+                    for tr in mie_proposte:
+                        sender_obj = next((t for t in teams if t['id'] == tr['sender_team_id']), None)
+                        st.write(f"Proposta da parte di **{sender_obj['name'] if sender_obj else 'Altra Squadra'}** | Conguaglio: {int(round(float(tr.get('cash_adjustment') or 0)))}M")
+                        
+                        col_acc, col_rif = st.columns(2)
+                        if col_acc.button("Accetta Scambio ✅", key=f"acc_{tr['id']}"):
+                            offerti_ids = [int(i) for i in tr['offered_player_ids'].split(',') if i]
+                            richiesti_ids = [int(i) for i in tr['requested_player_ids'].split(',') if i]
+                            
+                            for pid in offerti_ids:
+                                supabase.table("players").update({"team_id": tr['receiver_team_id']}).eq("id", pid).execute()
+                            for pid in richiesti_ids:
+                                supabase.table("players").update({"team_id": tr['sender_team_id']}).eq("id", pid).execute()
+                                
+                            supabase.table("trades").update({"status": "Accettato"}).eq("id", tr['id']).execute()
+                            st.success("Scambio accettato e completato con successo!")
+                            st.rerun()
+                            
+                        if col_rif.button("Rifiuta ❌", key=f"rif_{tr['id']}"):
+                            supabase.table("trades").update({"status": "Rifiutato"}).eq("id", tr['id']).execute()
+                            st.warning("Scambio rifiutato.")
+                            st.rerun()
+                else:
+                    st.info("Nessuna proposta di scambio in attesa.")
 
 # TAB 6: INSERIMENTO GIORNATE, CONVOCAZIONI U21 E RITARDO FORMAZIONE
-with tab6:
-    st.header("⚽ Inserimento Risultati Giornata & Convocazioni Under 21")
-    st.write("Inserisci i punteggi totali: i gol vengono assegnati partendo da 66 punti (+1 gol ogni 4 punti, es. 66-69.5 = 1 gol, 70-73.5 = 2 gol, 74-77.5 = 3 gol). I punti classifica vengono calcolati in base ai gol.")
-    
-    if not teams:
-        st.warning("Crea prima delle squadre.")
-    else:
-        with st.form("match_and_u21_form"):
-            giornata = st.number_input("Numero Giornata", min_value=1, max_value=38, step=1, value=1)
-            
-            col_m1, col_m2 = st.columns(2)
-            
-            team_casa_id = col_m1.selectbox("Squadra Casa", options=[t['id'] for t in teams], format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), key="ins_casa")
-            score_casa = col_m1.number_input("Punteggio Totale Casa (es. 74.5)", value=66.0, step=0.5, key="score_c")
-            ritardo_casa = col_m1.checkbox("⚠️ Formazione caricata in ritardo? (Multa automatica di 5M interi)", key="rit_c")
-            
-            col_m1.markdown("---")
-            col_m1.markdown("**Convocati Under 21 (Casa):**")
-            u21_casa_squad = [u for u in u21_players if u.get('team_id') == team_casa_id]
-            convocati_casa_ids = []
-            convocati_casa_nomi = []
-            if u21_casa_squad:
-                for u_p in u21_casa_squad:
-                    if col_m1.checkbox(f"{u_p['name']} ({u_p.get('roles', '')})", key=f"u21_c_{u_p['id']}"):
-                        convocati_casa_ids.append(u_p['id'])
-                        convocati_casa_nomi.append(u_p['name'])
-            else:
-                col_m1.info("Nessun giovane U21 in panchina per questa squadra.")
-
-            team_fuori_id = col_m2.selectbox("Squadra Ospite", options=[t['id'] for t in teams], format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), key="ins_fuori")
-            score_fuori = col_m2.number_input("Punteggio Totale Ospite (es. 71.0)", value=66.0, step=0.5, key="score_f")
-            ritardo_fuori = col_m2.checkbox("⚠️ Formazione caricata in ritardo? (Multa automatica di 5M interi)", key="rit_f")
-            
-            col_m2.markdown("---")
-            col_m2.markdown("**Convocati Under 21 (Ospite):**")
-            u21_fuori_squad = [u for u in u21_players if u.get('team_id') == team_fuori_id]
-            convocati_fuori_ids = []
-            convocati_fuori_nomi = []
-            if u21_fuori_squad:
-                for u_p in u21_fuori_squad:
-                    if col_m2.checkbox(f"{u_p['name']} ({u_p.get('roles', '')})", key=f"u21_f_{u_p['id']}"):
-                        convocati_fuori_ids.append(u_p['id'])
-                        convocati_fuori_nomi.append(u_p['name'])
-            else:
-                col_m2.info("Nessun giovane U21 in panchina per questa squadra.")
-
-            if st.form_submit_button("Registra Risultato, Multe & Presenze U21 ⚽"):
-                if team_casa_id == team_fuori_id:
-                    st.error("Seleziona due squadre diverse.")
+if st.session_state.authenticated:
+    with tab6:
+        st.header("⚽ Inserimento Risultati Giornata & Convocazioni Under 21")
+        st.write("Inserisci i punteggi totali: i gol vengono assegnati partendo da 66 punti (+1 gol ogni 4 punti, es. 66-69.5 = 1 gol, 70-73.5 = 2 gol, 74-77.5 = 3 gol). I punti classifica vengono calcolati in base ai gol.")
+        
+        if not teams:
+            st.warning("Crea prima delle squadre.")
+        else:
+            with st.form("match_and_u21_form"):
+                giornata = st.number_input("Numero Giornata", min_value=1, max_value=38, step=1, value=1)
+                
+                col_m1, col_m2 = st.columns(2)
+                
+                team_casa_id = col_m1.selectbox("Squadra Casa", options=[t['id'] for t in teams], format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), key="ins_casa")
+                score_casa = col_m1.number_input("Punteggio Totale Casa (es. 74.5)", value=66.0, step=0.5, key="score_c")
+                ritardo_casa = col_m1.checkbox("⚠️ Formazione caricata in ritardo? (Multa automatica di 5M interi)", key="rit_c")
+                
+                col_m1.markdown("---")
+                col_m1.markdown("**Convocati Under 21 (Casa):**")
+                u21_casa_squad = [u for u in u21_players if u.get('team_id') == team_casa_id]
+                convocati_casa_ids = []
+                convocati_casa_nomi = []
+                if u21_casa_squad:
+                    for u_p in u21_casa_squad:
+                        if col_m1.checkbox(f"{u_p['name']} ({u_p.get('roles', '')})", key=f"u21_c_{u_p['id']}"):
+                            convocati_casa_ids.append(u_p['id'])
+                            convocati_casa_nomi.append(u_p['name'])
                 else:
-                    gol_casa = calcola_gol(score_casa)
-                    gol_fuori = calcola_gol(score_fuori)
-                    
-                    if gol_casa > gol_fuori:
-                        pts_casa = 3
-                        pts_fuori = 0
-                    elif gol_casa == gol_fuori:
-                        pts_casa = 1
-                        pts_fuori = 1
+                    col_m1.info("Nessun giovane U21 in panchina per questa squadra.")
+
+                team_fuori_id = col_m2.selectbox("Squadra Ospite", options=[t['id'] for t in teams], format_func=lambda x: next(t['name'] for t in teams if t['id'] == x), key="ins_fuori")
+                score_fuori = col_m2.number_input("Punteggio Totale Ospite (es. 71.0)", value=66.0, step=0.5, key="score_f")
+                ritardo_fuori = col_m2.checkbox("⚠️ Formazione caricata in ritardo? (Multa automatica di 5M interi)", key="rit_f")
+                
+                col_m2.markdown("---")
+                col_m2.markdown("**Convocati Under 21 (Ospite):**")
+                u21_fuori_squad = [u for u in u21_players if u.get('team_id') == team_fuori_id]
+                convocati_fuori_ids = []
+                convocati_fuori_nomi = []
+                if u21_fuori_squad:
+                    for u_p in u21_fuori_squad:
+                        if col_m2.checkbox(f"{u_p['name']} ({u_p.get('roles', '')})", key=f"u21_f_{u_p['id']}"):
+                            convocati_fuori_ids.append(u_p['id'])
+                            convocati_fuori_nomi.append(u_p['name'])
+                else:
+                    col_m2.info("Nessun giovane U21 in panchina per questa squadra.")
+
+                if st.form_submit_button("Registra Risultato, Multe & Presenze U21 ⚽"):
+                    if team_casa_id == team_fuori_id:
+                        st.error("Seleziona due squadre diverse.")
                     else:
-                        pts_casa = 0
-                        pts_fuori = 3
+                        gol_casa = calcola_gol(score_casa)
+                        gol_fuori = calcola_gol(score_fuori)
                         
-                    supabase.table("match_results").insert([
-                        {
-                            "matchday": int(giornata),
-                            "team_id": team_casa_id,
-                            "opponent_team_id": team_fuori_id,
-                            "team_score": score_casa,
-                            "opponent_score": score_fuori,
-                            "match_points": pts_casa,
-                            "u21_convocati": ", ".join(convocati_casa_nomi),
-                            "season": active_season
-                        },
-                        {
-                            "matchday": int(giornata),
-                            "team_id": team_fuori_id,
-                            "opponent_team_id": team_casa_id,
-                            "team_score": score_fuori,
-                            "opponent_score": score_casa,
-                            "match_points": pts_fuori,
-                            "u21_convocati": ", ".join(convocati_fuori_nomi),
-                            "season": active_season
-                        }
-                    ]).execute()
-                    
-                    multa_valore = 5
-                    if ritardo_casa:
-                        team_c_obj = next(t for t in teams if t['id'] == team_casa_id)
-                        nuova_cassa_c = int(round(float(team_c_obj['balance']))) - multa_valore
-                        supabase.table("teams").update({"balance": int(nuova_cassa_c)}).eq("id", team_casa_id).execute()
-                        supabase.table("line_up_delays").insert({"team_id": team_casa_id, "matchday": int(giornata), "fine_amount": multa_valore, "season": active_season}).execute()
-                        registra_snapshot_finanziario(team_casa_id, f"Multa Ritardo G. {giornata}", nuova_cassa_c)
-                        
-                    if ritardo_fuori:
-                        team_f_obj = next(t for t in teams if t['id'] == team_fuori_id)
-                        nuova_cassa_f = int(round(float(team_f_obj['balance']))) - multa_valore
-                        supabase.table("teams").update({"balance": int(nuova_cassa_f)}).eq("id", team_fuori_id).execute()
-                        supabase.table("line_up_delays").insert({"team_id": team_fuori_id, "matchday": int(giornata), "fine_amount": multa_valore, "season": active_season}).execute()
-                        registra_snapshot_finanziario(team_fuori_id, f"Multa Ritardo G. {giornata}", nuova_cassa_f)
-                    
-                    for uid in convocati_casa_ids:
-                        giovane_obj = next((x for x in u21_players if x['id'] == uid), None)
-                        if giovane_obj:
-                            nuove_presenze = int(giovane_obj.get('presenze') or 0) + 1
-                            supabase.table("u21_players").update({"presenze": nuove_presenze}).eq("id", uid).execute()
+                        if gol_casa > gol_fuori:
+                            pts_casa = 3
+                            pts_fuori = 0
+                        elif gol_casa == gol_fuori:
+                            pts_casa = 1
+                            pts_fuori = 1
+                        else:
+                            pts_casa = 0
+                            pts_fuori = 3
                             
-                    for uid in convocati_fuori_ids:
-                        giovane_obj = next((x for x in u21_players if x['id'] == uid), None)
-                        if giovane_obj:
-                            nuove_presenze = int(giovane_obj.get('presenze') or 0) + 1
-                            supabase.table("u21_players").update({"presenze": nuove_presenze}).eq("id", uid).execute()
+                        supabase.table("match_results").insert([
+                            {
+                                "matchday": int(giornata),
+                                "team_id": team_casa_id,
+                                "opponent_team_id": team_fuori_id,
+                                "team_score": score_casa,
+                                "opponent_score": score_fuori,
+                                "match_points": pts_casa,
+                                "u21_convocati": ", ".join(convocati_casa_nomi),
+                                "season": active_season
+                            },
+                            {
+                                "matchday": int(giornata),
+                                "team_id": team_fuori_id,
+                                "opponent_team_id": team_casa_id,
+                                "team_score": score_fuori,
+                                "opponent_score": score_casa,
+                                "match_points": pts_fuori,
+                                "u21_convocati": ", ".join(convocati_fuori_nomi),
+                                "season": active_season
+                            }
+                        ]).execute()
+                        
+                        multa_valore = 5
+                        if ritardo_casa:
+                            team_c_obj = next(t for t in teams if t['id'] == team_casa_id)
+                            nuova_cassa_c = int(round(float(team_c_obj['balance']))) - multa_valore
+                            supabase.table("teams").update({"balance": int(nuova_cassa_c)}).eq("id", team_casa_id).execute()
+                            supabase.table("line_up_delays").insert({"team_id": team_casa_id, "matchday": int(giornata), "fine_amount": multa_valore, "season": active_season}).execute()
+                            registra_snapshot_finanziario(team_casa_id, f"Multa Ritardo G. {giornata}", nuova_cassa_c)
+                            
+                        if ritardo_fuori:
+                            team_f_obj = next(t for t in teams if t['id'] == team_fuori_id)
+                            nuova_cassa_f = int(round(float(team_f_obj['balance']))) - multa_valore
+                            supabase.table("teams").update({"balance": int(nuova_cassa_f)}).eq("id", team_fuori_id).execute()
+                            supabase.table("line_up_delays").insert({"team_id": team_fuori_id, "matchday": int(giornata), "fine_amount": multa_valore, "season": active_season}).execute()
+                            registra_snapshot_finanziario(team_fuori_id, f"Multa Ritardo G. {giornata}", nuova_cassa_f)
+                        
+                        for uid in convocati_casa_ids:
+                            giovane_obj = next((x for x in u21_players if x['id'] == uid), None)
+                            if giovane_obj:
+                                nuove_presenze = int(giovane_obj.get('presenze') or 0) + 1
+                                supabase.table("u21_players").update({"presenze": nuove_presenze}).eq("id", uid).execute()
+                                
+                        for uid in convocati_fuori_ids:
+                            giovane_obj = next((x for x in u21_players if x['id'] == uid), None)
+                            if giovane_obj:
+                                nuove_presenze = int(giovane_obj.get('presenze') or 0) + 1
+                                supabase.table("u21_players").update({"presenze": nuove_presenze}).eq("id", uid).execute()
 
-                    st.success(f"✅ Risultato Giornata {giornata} registrato: **{gol_casa} - {gol_fuori}** ({score_casa} - {score_fuori})! Assegnati {pts_casa} pt alla squadra di casa e {pts_fuori} pt all'ospite.")
-                    st.rerun()
+                        st.success(f"✅ Risultato Giornata {giornata} registrato: **{gol_casa} - {gol_fuori}** ({score_casa} - {score_fuori})! Assegnati {pts_casa} pt alla squadra di casa e {pts_fuori} pt all'ospite.")
+                        st.rerun()
 
-# TAB 7: MERCATO (Se Admin)
+# TAB 7: MERCATO ADMIN (Se Admin)
 if st.session_state.is_admin:
     with tab7:
         st.header("Mercato Svincolati & Scadenze di Febbraio (Admin)")
@@ -957,7 +1033,7 @@ if st.session_state.is_admin:
                     selected_player_id = st.selectbox(
                         "Cerca e Seleziona Giocatore dal Listone", 
                         options=[p['id'] for p in svincolati_ordinati], 
-                        format_func=lambda x: next(f"{p['name']} | Ruolo: {p.get('roles', 'N/D')} | Squadra: {p.get('serie_a_team', 'N/D')} | Quotazione: (int(round(float(p.get('current_fg_value') or 1)))))M" for p in svincolati_ordinati if p['id'] == x),
+                        format_func=lambda x: next(f"{p['name']} | Ruolo: {p.get('roles', 'N/D')} | Squadra: {p.get('serie_a_team', 'N/D')} | Quotazione: {int(round(float(p.get('current_fg_value') or 1)))} M" for p in svincolati_ordinati if p['id'] == x),
                         key="acq_player_mercato"
                     )
                     
@@ -1124,6 +1200,61 @@ with tab_hof:
                         st.info("Nessuna giornata presente nei dati archiviati.")
                 else:
                     st.info("Nessun match registrato per questa stagione.")
+
+# TAB REGOLAMENTO
+with tab_reg:
+    st.header("📖 Regolamento Ufficiale FantaGestionale")
+    st.write("Benvenuti nel cuore pulsante della lega. Questo regolamento disciplina gli aspetti economici e contrattuali per garantire un bilanciamento manageriale duraturo nel tempo.")
+    
+    st.markdown("""
+    ### 1. Finanze e Flussi di Cassa
+    Ogni squadra inizia la sua storia con un budget base di **500 Crediti**. 
+    Il campionato è diviso in 4 trimestri economici. All'inizio del 1°, del 2°, del 3° e del 4° trimestre viene erogata una **Tranche di 120 Crediti**.
+    Gli stipendi dei giocatori pesano sul bilancio: **il 50% del totale del monte ingaggi viene pagato al 2° Trimestre, il restante 50% viene pagato a fine anno**.
+
+    ### 2. Contratti, Salary Cap e Luxury Tax
+    Ogni lega deve rispettare dei paletti per non fallire:
+    * **Limite Anni:** La somma degli anni di contratto di tutti i giocatori in rosa non può superare il limite di **55 Anni**. Un giocatore può firmare per un massimo di 3 anni alla volta.
+    * **Salary Cap (Tetto Ingaggi):** Fissato a **315 M**.
+    * **Luxury Tax:** Superare il Salary Cap è permesso, ma costa caro. Chi sfora paga una tassa pari al **50% dello sforo**. L'intero ammontare della Luxury Tax raccolta a fine anno viene diviso in parti uguali e ridistribuito come premio di rendimento alle squadre virtuose che NON hanno sforato il tetto.
+
+    ### 3. Svincoli, Penali e Cessioni all'Estero
+    * **Svincolo Unilaterale:** Svincolare un giocatore comporta il pagamento di una penale immediata pari al **10% del suo stipendio** (arrotondato).
+    * **Cessione all'Estero:** Se un giocatore va all'estero nella realtà, la FantaSquadra incassa immediatamente il **valore residuo ammortizzato** del cartellino. *Alternativamente*, è possibile mantenere il giocatore in rosa come "Congelato": i suoi anni di contratto continuano a pesare sul totale della squadra, ma **il suo stipendio non viene contato** né nel Salary Cap né nei pagamenti semestrali. Se torna in Serie A, il contratto si scongela.
+    * **Clausola Blocco Riacquisto:** Un giocatore venduto o svincolato non può essere riacquistato dalla stessa squadra per almeno **12 mesi**.
+
+    ### 4. Infrastrutture: Lo Stadio
+    Lo Stadio è un asset fondamentale che garantisce introiti a fine stagione, ma richiede manutenzione. Esistono 4 Livelli:
+    1. **Base:** Manutenzione 2M / Bonus Incasso +5M
+    2. **Medio:** Manutenzione 5M / Bonus Incasso +10M
+    3. **Top:** Manutenzione 10M / Bonus Incasso +15M
+    4. **Advanced:** Manutenzione 15M / Bonus Incasso +20M
+    *A fine anno viene accreditato in cassa il Saldo Netto (Bonus - Manutenzione). Se una squadra non ha fondi per pagare la manutenzione, lo stadio viene **declassato** al livello inferiore.*
+
+    ### 5. Settore Giovanile (Panchina U21)
+    Esiste una cassa parallela, separata da quella principale, dedicata ai giovani: **Budget U21 di 30M**.
+    In questa panchina possono essere tesserati solo giocatori giovani presi dal listone. 
+    Per poterli promuovere a tutti gli effetti come futuri titolari, il giovane **deve accumulare 5 presenze** (convocazioni a voto) durante la stagione. Svincolare un U21 rimborsa per intero il suo costo sul Budget U21.
+
+    ### 6. Partite, Gol e Multe
+    Il calcolo dei gol segue fasce matematiche rigorose:
+    * Meno di **66 punti** = 0 Gol.
+    * Da **66 punti** = 1 Gol.
+    * Ogni **4 punti successivi** = +1 Gol (es. 70=2, 74=3, 78=4, ecc.).
+    * **Multa Ritardo:** Se la formazione viene schierata in ritardo, scatta automaticamente una multa disciplinare di **5 M** sottratta dalla cassa societaria.
+
+    ### 7. Scambi e Prestiti
+    Il mercato tra presidenti è libero ma sorvegliato:
+    * **Scambi Definitivi:** Il differenziale delle quotazioni tra i giocatori scambiati non deve superare il 10%. Se lo supera, va obbligatoriamente compensato inserendo un "Conguaglio in Crediti".
+    * **Prestiti:** I giocatori possono essere prestati ad altre squadre. Si può decidere con un cursore (da 0% a 100%) quanta percentuale dello stipendio verrà pagata da chi riceve il prestito a fine anno.
+
+    ### 8. Premi e Paracadute di Fine Stagione
+    A fine anno, dopo la 38° giornata, la cassa comune (costituita dalle quote di partecipazione) viene distribuita:
+    * **1° Classificato:** 70% del montepremi.
+    * **2° Classificato:** 30% del montepremi.
+    * **3° Classificato:** Rimborso quota d'iscrizione.
+    * **Paracadute:** Per bilanciare la lega, le ultime tre squadre classificate ricevono un'iniezione di cassa salvavita a fine anno: l'Ultimo riceve +15M, il Penultimo +10M, il Terzultimo +5M.
+    """)
 
 # TAB 8: ADMIN (Esclusivo Admin)
 if st.session_state.is_admin:
@@ -1364,15 +1495,15 @@ if st.session_state.is_admin:
                 except Exception as e:
                     st.error(f"Errore: {e}")
 
-        with st.expander("📋 6. Gestione Rose: Modifica Singola & Importazione CSV"):
-            tab_singolo, tab_massivo = st.tabs(["✏️ Modifica Giocatore Singolo", "📁 Importa Rosa (CSV)"])
+        with st.expander("📋 6. Gestione Rose: Inizializzazione & Importazione CSV"):
+            tab_singolo, tab_massivo = st.tabs(["✏️ Assegnazione Singola", "📁 Importa Rosa (CSV)"])
             
             with tab_singolo:
-                st.write("Seleziona un giocatore dal menu a tendina. I box sottostanti si aggiorneranno automaticamente con i valori attuali nel database.")
+                st.write("Inizializza o riassegna un giocatore. (Per modificare stipendi e anni di una rosa, vai in **'📋 Rose & Svincoli'** e usa la Modifica Massiva).")
                 disponibili_init = sorted([p for p in players], key=lambda x: x['name'])
                 
                 init_player_id = st.selectbox(
-                    "Giocatore da Modificare", 
+                    "Giocatore da Assegnare", 
                     options=[p['id'] for p in disponibili_init], 
                     format_func=lambda x: next((f"{p['name']} | Attuale Squadra: {next((t['name'] for t in teams if t['id'] == p.get('team_id')), 'Svincolato')} | Stipendio: {int(round(float(p.get('salary') or 0)))}M" for p in disponibili_init if p['id'] == x), "N/D"),
                     key="sel_mod_singolo"
@@ -1396,7 +1527,7 @@ if st.session_state.is_admin:
                 new_salary = st.number_input("Stipendio / Ingaggio (M)", min_value=0, value=curr_salary, step=1, key=f"sal_mod_{init_player_id}")
                 new_years = st.number_input("Anni di Contratto Residui", min_value=0, max_value=5, value=curr_years, step=1, key=f"yr_mod_{init_player_id}")
                 
-                if st.button("Salva Modifiche Giocatore ✍️", key=f"btn_save_mod_{init_player_id}"):
+                if st.button("Salva Assegnazione Giocatore ✍️", key=f"btn_save_mod_{init_player_id}"):
                     upd_payload = {
                         "team_id": new_team_id,
                         "salary": new_salary,
@@ -1564,14 +1695,12 @@ if st.session_state.is_admin:
                 st.success("🇮🇹 Giocatore rientrato in Italia: stipendio regolarmente riattivato nel monte ingaggi!")
                 st.rerun()
 
-        # PROCEDURA DI FINE STAGIONE STEP-BY-STEP (TUTTO IN INTERI)
         with st.expander("🏁 8. Procedura Guidata di Fine Stagione (In Ordine Rigoroso)"):
             st.write("Esegui le operazioni di chiusura stagione in ordine. Per ogni passaggio potrai decidere se applicarlo a tutte le squadre o escluderne alcune.")
             
             livelli_stadi_order = ['Base', 'Medio', 'Top', 'Advanced']
             team_names_map = {t['id']: t['name'] for t in teams}
 
-            # 1. ACCREDITO ULTIMA TRANCHE
             st.markdown("#### 1️⃣ Passo 1: Accredito Ultima Tranche Trimestrale (+120M)")
             st.write("Accredita i 120M di cassa per l'ultimo trimestre.")
             opt_tranche = st.radio("Vuoi accreditare l'ultima tranche a tutte le squadre?", ["Sì, a tutte le squadre", "No, escludi alcune squadre"], key="rad_tranche")
@@ -1593,7 +1722,6 @@ if st.session_state.is_admin:
 
             st.divider()
 
-            # 2. PAGAMENTO SALDO STIPENDI
             st.markdown("#### 2️⃣ Passo 2: Pagamento Saldo Stipendi (Ultima Metà)")
             st.write("Scala la restante metà degli stipendi annui (esclusi i giocatori all'estero).")
             opt_stipendi = st.radio("Vuoi scalare il saldo stipendi a tutte le squadre?", ["Sì, a tutte le squadre", "No, escludi alcune squadre"], key="rad_stipendi")
@@ -1618,7 +1746,6 @@ if st.session_state.is_admin:
 
             st.divider()
 
-            # 3. SALDO STADIO & MANUTENZIONE
             st.markdown("#### 3️⃣ Passo 3: Pagamento Manutenzione Stadio & Accredito Bonus")
             st.write("Applica il saldo netto dello stadio (Bonus - Manutenzione). Se una squadra viene esclusa dal pagamento della manutenzione, **il suo stadio retrocede di un livello**.")
             opt_stadio = st.radio("Vuoi far pagare la manutenzione e accreditare il bonus a tutte le squadre?", ["Sì, a tutte le squadre", "No, escludi alcune squadre"], key="rad_stadio")
@@ -1650,7 +1777,6 @@ if st.session_state.is_admin:
 
             st.divider()
 
-            # 4. SVINCOLO GIOCATORI IN SCADENZA
             st.markdown("#### 4️⃣ Passo 4: Svincolo Giocatori in Scadenza (Contratto $\le$ 1 Anno)")
             st.write("Svincola automaticamente e rimette nel listone tutti i giocatori arrivati a fine contratto.")
             opt_svincolo = st.radio("Vuoi eseguire lo svincolo automatico dei giocatori in scadenza per tutte le squadre?", ["Sì, a tutte le squadre", "No, escludi alcune squadre"], key="rad_svincolo")
@@ -1680,7 +1806,6 @@ if st.session_state.is_admin:
 
             st.divider()
 
-            # 5. SALVATAGGIO NELL'ALBO D'ORO & RESET CLASSIFICA
             st.markdown("#### 5️⃣ Passo 5: Archiviazione Ufficiale nell'Albo d'Oro & Reset Classifica")
             st.write("Salva la classifica finale ufficiale e tutte le partite della stagione nell'Albo d'Oro. **Una volta archiviato, i risultati vengono ripuliti e la classifica in Schermata 1 si azzera automaticamente** per iniziare la nuova stagione.")
             stagione_da_archiviare = st.text_input("Nome Stagione da Archiviare:", value=active_season, key="txt_hof_save")
